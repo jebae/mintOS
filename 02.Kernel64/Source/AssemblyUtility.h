@@ -4,6 +4,12 @@
 #include "Types.h"
 
 BYTE inPortByte(WORD port);
-BYTE outPortByte(WORD port, BYTE data);
+void outPortByte(WORD port, BYTE data);
+void loadGDTR(QWORD GDTRAddress);
+void loadTR(WORD TSSSegmentOffset);
+void loadIDTR(QWORD IDTRAddress);
+void enableInterrupt(void);
+void disableInterrupt(void);
+QWORD readRFLAGS(void);
 
 #endif

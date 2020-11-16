@@ -2,7 +2,8 @@
 
 SECTION .text
 
-global inPortByte, outPortByte
+global inPortByte, outPortByte, loadGDTR, loadTR, loadIDTR
+global enableInterrupt, disableInterrupt, readRFLAGS
 
 ; PARAM: port number
 inPortByte:
@@ -28,4 +29,29 @@ outPortByte:
 
 	pop rax
 	pop rdx
+	ret
+
+loadGDTR:
+	lgdt [rdi]
+	ret
+
+loadTR:
+	ltr di
+	ret
+
+loadIDTR:
+	lidt [rdi]
+	ret
+
+enableInterrupt:
+	sti
+	ret
+
+disableInterrupt:
+	cli
+	ret
+
+readRFLAGS:
+	pushfq	; cannot read RFLAGS register directly, so use stack
+	pop rax	; rax is return value of function
 	ret
