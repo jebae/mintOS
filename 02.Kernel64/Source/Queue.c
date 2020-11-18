@@ -26,7 +26,7 @@ BOOL putQueue(QUEUE* q, const void* data)
 {
 	if (isQueueFull(q))
 		return FALSE;
-	memCpy((char*)(q->arr) + q->putIdx * q->dataSize, data, q->dataSize);
+	memcpy((char*)(q->arr) + q->putIdx * q->dataSize, data, q->dataSize);
 	q->putIdx = (q->putIdx + 1) % q->maxDataCount;
 	q->lastOperationPut = TRUE;
 	return TRUE;
@@ -36,7 +36,7 @@ BOOL getQueue(QUEUE* q, void* data)
 {
 	if (isQueueEmpty(q))
 		return FALSE;
-	memCpy(data, (char*)(q->arr) + q->getIdx * q->dataSize, q->dataSize);
+	memcpy(data, (char*)(q->arr) + q->getIdx * q->dataSize, q->dataSize);
 	q->getIdx = (q->getIdx + 1) % q->maxDataCount;
 	q->lastOperationPut = FALSE;
 	return TRUE;

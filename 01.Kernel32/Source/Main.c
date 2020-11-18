@@ -80,7 +80,7 @@ void printString(int iX, int iY, const char *pcString)
 	pstScreen += (iY * 80) + iX;
 	for (i=0; pcString[i] != 0; i++)
 	{
-		pstScreen[i].bCharacter = pcString[i];
+		pstScreen[i].character = pcString[i];
 	}
 }
 

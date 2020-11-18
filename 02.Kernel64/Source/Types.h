@@ -15,8 +15,8 @@
 
 typedef struct CharactorStruct
 {
-	BYTE bCharacter;
-	BYTE bAttribute;
+	BYTE character;
+	BYTE attribute;
 } CHARACTER;
 
 #pragma pack(pop)

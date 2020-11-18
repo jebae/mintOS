@@ -62,7 +62,7 @@ void setGDTEntry16(GDT_ENTRY16* entry, QWORD baseAddress, DWORD limit,
 
 void initTSSSegment(TSS_SEGMENT* TSS)
 {
-	memSet(TSS, 0, sizeof(TSS_SEGMENT));
+	memset(TSS, 0, sizeof(TSS_SEGMENT));
 	TSS->IST[0] = IST_START_ADDRESS + IST_SIZE;
 	TSS->IOMapBaseAddress = 0xFFFF; // disable blocking IO access from application
 }
