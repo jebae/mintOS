@@ -48,6 +48,8 @@
 #define KEY_F12         0x9F
 #define KEY_PAUSE       0xA0
 
+#define KEY_MAX_QUEUE_COUNT		100
+
 #pragma pack(push, 1)
 
 typedef struct keyMappingEntryStruct
@@ -55,8 +57,6 @@ typedef struct keyMappingEntryStruct
 	BYTE normalCode;		// ascii value without combined key
 	BYTE combinedCode;	// ascii value with combined key
 } KEY_MAPPING_ENTRY;
-
-#pragma pack(pop)
 
 typedef struct keyboardManagerStruct
 {
@@ -68,10 +68,19 @@ typedef struct keyboardManagerStruct
 	int skipCountForPause;
 } KEYBOARD_MANAGER;
 
+typedef struct keyDataStruct
+{
+	BYTE scanCode;
+	BYTE ASCIICode;
+	BYTE flags;
+} KEY_DATA;
+
+#pragma pack(pop)
+
 BOOL isOutputBufferFull(void);
 BOOL isInputBufferFull(void);
 BOOL activateKeyboard(void);
-BYTE getKeybardScanCode(void);
+BYTE getKeyboardScanCode(void);
 BOOL changeKeyboardLED(BOOL capsLockOn, BOOL numLockOn, BOOL scrollLockOn);
 void enableA20Gate(void);
 void reboot(void);
@@ -81,5 +90,8 @@ BOOL isNumberPadScanCode(BYTE scanCode);
 BOOL isUseCombinedCode(BYTE scanCode);
 void updateCombinationKeyStatusAndLED(BYTE scanCode);
 BOOL convertScanCodeToASCIICode(BYTE scanCode, BYTE* ASCIICode, BOOL* flags);
+BOOL initKeyboard(void);
+BOOL convertScanCodeAndPutQueue(BYTE scanCode);
+BOOL getKeyFromKeyQueue(KEY_DATA* data);
 
 #endif

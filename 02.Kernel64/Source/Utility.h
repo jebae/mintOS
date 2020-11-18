@@ -6,5 +6,6 @@
 void memSet(void* dest, BYTE data, int size);
 int memCpy(void* dest, const void* src, int size);
 int memCmp(const void* a, const void* b, int size);
+BOOL setInterruptFlag(BOOL enableInterrupt);
 
 #endif

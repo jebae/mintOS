@@ -1,6 +1,7 @@
-#include "Types.h"
 #include "AssemblyUtility.h"
+#include "Utility.h"
 #include "Keyboard.h"
+#include "Queue.h"
 
 // check data sent from keyboard
 BOOL isOutputBufferFull(void)
@@ -19,10 +20,40 @@ BOOL isInputBufferFull(void)
 	return FALSE;
 }
 
+BOOL waitForACKAndPutOtherScanCode(void)
+{
+	int i, j;
+	BYTE data;
+	BOOL ACKReceived = FALSE;
+
+	for (j=0; j < 100; j++)
+	{
+		for (i=0; i < 0xFFFF; i++)
+		{
+			if (isOutputBufferFull())
+				break;
+		}
+		data = inPortByte(0x60);
+		if (data == 0xFA) // ACK
+		{
+			ACKReceived = TRUE;
+			break;
+		}
+		else
+		{
+			convertScanCodeAndPutQueue(data);
+		}
+	}
+	return ACKReceived;
+}
+
 BOOL activateKeyboard(void)
 {
-	int i;
-	int j;
+	int i, j;
+	BOOL previousInterrupt;
+	BOOL res;
+
+	previousInterrupt = setInterruptFlag(FALSE);
 
 	// 0xAE means activation command for keyboard controller
 	outPortByte(0x64, 0xAE);
@@ -41,24 +72,12 @@ BOOL activateKeyboard(void)
 	 */
 	outPortByte(0x60, 0xF4);
 
-	/*
-	 * wait until keyboard send ACK (0xFA).
-	 * loop for j exists to skip none ACK data
-	 */
-	for (j=0; j < 100; j++)
-	{
-		for (i=0; i < 0xFFFF; i++)
-		{
-			if (isOutputBufferFull() == TRUE)
-				break;
-		}
-		if (inPortByte(0x60) == 0xFA)
-			return TRUE;
-	}
-	return FALSE;
+	res = waitForACKAndPutOtherScanCode();
+	setInterruptFlag(previousInterrupt);
+	return res;
 }
 
-BYTE getKeybardScanCode(void)
+BYTE getKeyboardScanCode(void)
 {
 	while (isOutputBufferFull() == FALSE);
 	return inPortByte(0x60);
@@ -67,6 +86,11 @@ BYTE getKeybardScanCode(void)
 BOOL changeKeyboardLED(BOOL capsLockOn, BOOL numLockOn, BOOL scrollLockOn)
 {
 	int i, j;
+	BOOL previousInterrupt;
+	BOOL res;
+	BYTE data;
+
+	previousInterrupt = setInterruptFlag(FALSE);
 
 	for (i=0; i < 0xFFFF; i++)
 	{
@@ -83,19 +107,12 @@ BOOL changeKeyboardLED(BOOL capsLockOn, BOOL numLockOn, BOOL scrollLockOn)
 			break;
 	}
 
-	for (j=0; j < 100; j++)
+	res = waitForACKAndPutOtherScanCode();
+	if (!res)
 	{
-		for (i=0; i < 0xFFFF; i++)
-		{
-			if (isOutputBufferFull() == TRUE)
-				break;
-		}
-
-		if (inPortByte(0x60) == 0xFA)
-			break;
-	}
-	if (j >= 100)
+		setInterruptFlag(previousInterrupt);
 		return FALSE;
+	}
 
 	// change LED status
 	outPortByte(0x60, (capsLockOn << 2) | (numLockOn << 1) | scrollLockOn);
@@ -104,19 +121,9 @@ BOOL changeKeyboardLED(BOOL capsLockOn, BOOL numLockOn, BOOL scrollLockOn)
 		if (isInputBufferFull() == FALSE)
 			break;
 	}
-	for (j=0; j < 100; j++)
-	{
-		for (i=0; i < 0xFFFF; i++)
-		{
-			if (isOutputBufferFull() == TRUE)
-				break;
-		}
-		if (inPortByte(0x60) == 0xFA)
-			break; 
-	}
-	if (j >= 100)
-		return FALSE;
-	return TRUE;
+	res = waitForACKAndPutOtherScanCode();
+	setInterruptFlag(previousInterrupt);
+	return res;
 }
 
 void enableA20Gate(void)
@@ -160,6 +167,9 @@ void reboot(void)
 	outPortByte(0x60, 0x00);
 	while (1);
 }
+
+static QUEUE gKeyQueue;
+static KEY_DATA gKeyQueueBuffer[KEY_MAX_QUEUE_COUNT];
 
 static KEYBOARD_MANAGER gKeyboardManager = {0, };
 
@@ -256,6 +266,41 @@ static KEY_MAPPING_ENTRY gKeyMappingTable[KEY_MAPPING_TABLE_MAX_COUNT] = {
 	/*  87  */  {   KEY_F11         ,   KEY_F11         },
 	/*  88  */  {   KEY_F12         ,   KEY_F12         }
 };
+
+BOOL initKeyboard(void)
+{
+	initQueue(&gKeyQueue, gKeyQueueBuffer, KEY_MAX_QUEUE_COUNT, sizeof(KEY_DATA));
+	return activateKeyboard();
+}
+
+BOOL convertScanCodeAndPutQueue(BYTE scanCode)
+{
+	KEY_DATA data;
+	BOOL res = FALSE;
+	BOOL previousInterrupt;
+
+	data.scanCode = scanCode;
+	if (convertScanCodeToASCIICode(scanCode, &data.ASCIICode, &data.flags))
+	{
+		previousInterrupt = setInterruptFlag(FALSE);
+		res = putQueue(&gKeyQueue, &data);
+		setInterruptFlag(previousInterrupt);
+	}
+	return res;
+}
+
+BOOL getKeyFromKeyQueue(KEY_DATA* data)
+{
+	BOOL res;
+	BOOL previousInterrupt;
+
+	if (isQueueEmpty(&gKeyQueue))
+		return FALSE;
+	previousInterrupt = setInterruptFlag(FALSE);
+	res = getQueue(&gKeyQueue, data);
+	setInterruptFlag(previousInterrupt);
+	return res;
+}
 
 BOOL isAlphabetScanCode(BYTE scanCode)
 {

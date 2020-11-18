@@ -9,9 +9,8 @@ void printString(int iX, int iY, const char *pcString);
 void Main(void)
 {
 	char temp[2] = {0, };
-	BYTE flags;
-	BYTE scanCode;
 	int i = 0;
+	KEY_DATA keyData;
 
 	printString(0, 10, "Switch To IA-32e Mode Success");
 	printString(0, 11, "IA-32e C Language Kernel Start.....[PASS]");
@@ -30,15 +29,15 @@ void Main(void)
 	loadIDTR(IDTR_START_ADDRESS);
 	printString(14, 14, "PASS");
 
-	printString(0, 15, "Keyboard Activate.....[    ]");
-	if (activateKeyboard())
+	printString(0, 15, "Keyboard Activate And Queue Initialize.....[    ]");
+	if (initKeyboard())
 	{
-		printString(23, 15, "PASS");
+		printString(44, 15, "PASS");
 		changeKeyboardLED(FALSE, FALSE, FALSE);
 	}
 	else
 	{
-		printString(23, 15, "FAIL");
+		printString(44, 15, "FAIL");
 		while (1);
 	}
 
@@ -49,13 +48,13 @@ void Main(void)
 	printString(45, 16, "PASS");
 	while (1)
 	{
-		if (!isOutputBufferFull())
+		if (!getKeyFromKeyQueue(&keyData))
 			continue;
-		scanCode = getKeybardScanCode();
-		if (!convertScanCodeToASCIICode(scanCode, &temp[0], &flags))
-			continue;
-		if (flags & KEY_FLAGS_DOWN)
+		if (keyData.flags & KEY_FLAGS_DOWN)
+		{
+			temp[0] = keyData.ASCIICode;
 			printString(i++, 17, temp);
+		}
 		if (temp[0] == '0')
 			temp[0] /= 0;
 	}

@@ -1,5 +1,6 @@
 #include "InterruptHandler.h"
 #include "PIC.h"
+#include "Keyboard.h"
 
 void commonExceptionHandler(int vecNum, QWORD errCode)
 {
@@ -37,11 +38,18 @@ void keyboardHandler(int vecNum)
 {
 	char buf[] = "[INT:  , ]";
 	static int gKeyboardInterruptCount = 0;
+	BYTE scanCode;
 
 	buf[5] = '0' + vecNum / 10;
 	buf[6] = '0' + vecNum % 10;
 	buf[8] = '0' + gKeyboardInterruptCount;
 	gKeyboardInterruptCount = (gKeyboardInterruptCount + 1) % 10;
 	printString(0, 0, buf);
+
+	if (isOutputBufferFull())
+	{
+		scanCode = getKeyboardScanCode();
+		convertScanCodeAndPutQueue(scanCode);
+	}
 	sendEOIToPIC(vecNum - PIC_IRQ_START_VECTOR);
 }
