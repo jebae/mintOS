@@ -2,6 +2,9 @@
 #include "Console.h"
 #include "Keyboard.h"
 #include "Utility.h"
+#include "AssemblyUtility.h"
+#include "PIT.h"
+#include "RTC.h"
 
 SHELL_COMMAND_ENTRY gCommandTable[] = {
 	{"help", "show help", help},
@@ -9,6 +12,11 @@ SHELL_COMMAND_ENTRY gCommandTable[] = {
 	{"totalram", "show total RAM size", showTotalRAMSize},
 	{"strtod", "string to decimal/hex convert", stringToDecimalHexTest},
 	{"shutdown", "shutdown and reboot os", shutdown},
+	{"settimer", "set PIT controller counter0, ex) settimer 10(ms) 1(periodic)", setTimer},
+	{"wait", "wait ms using PIT", waitUsingPIT},
+	{"rdtsc", "read timestamp counter", readTimestampCounter},
+	{"cpuspeed", "measure processor speed", measureProcessorSpeed},
+	{"date", "show date and time", showDateAndTime},
 };
 
 void startConsoleShell(void)
@@ -181,4 +189,93 @@ void shutdown(const char* params)
 	printf("Press any key to reboot...");
 	getch();
 	reboot();
+}
+
+void setTimer(const char* params)
+{
+	PARAMETER_LIST paramList;
+	char param[100];
+	long ms;
+	BOOL isPeriodic;
+
+	initParameter(&paramList, params);
+	if (getNextParameter(&paramList, param) == 0)
+	{
+		printf("ex) settimer 10(ms) 1(periodic)\n");
+		return;
+	}
+	ms = atoi(param, 10);
+	if (getNextParameter(&paramList, param) == 0)
+	{
+		printf("ex) settimer 10(ms) 1(periodic)\n");
+		return;
+	}
+	isPeriodic = atoi(param, 10);
+	initPIT(MS_TO_COUNT(ms), isPeriodic);
+	printf("Time = %d ms, Periodic = %d, Change complete\n", ms, isPeriodic);
+}
+
+void waitUsingPIT(const char* params)
+{
+	PARAMETER_LIST paramList;
+	char param[100];
+	long ms;
+	int until;
+	int i;
+
+	initParameter(&paramList, params);
+	if (getNextParameter(&paramList, param) == 0)
+	{
+		printf("ex) wait 100(ms)\n");
+		return;
+	}
+	ms = atoi(param, 10);
+	printf("%d ms sleep\n", ms);
+	disableInterrupt();
+	until = ms / 30;
+	for (i=0; i < until; i++)
+		waitUsingDirectPIT(MS_TO_COUNT(30));
+	waitUsingDirectPIT(MS_TO_COUNT(ms % 30));
+	enableInterrupt();
+
+	// restore timer
+	initPIT(MS_TO_COUNT(1), TRUE);
+}
+
+void readTimestampCounter(const char* params)
+{
+	QWORD tsc;
+
+	tsc = readTSC();
+	printf("timestamp counter: 0x%q\n", tsc);
+}
+
+void measureProcessorSpeed(const char* params)
+{
+	int i;
+	QWORD lastTSC, totalTSC = 0;
+
+	// calculate speed for 10s
+	disableInterrupt();
+	for (i=0; i < 200; i++)
+	{
+		lastTSC = readTSC();
+		waitUsingDirectPIT(MS_TO_COUNT(50));
+		totalTSC += readTSC() - lastTSC;
+	}
+	initPIT(MS_TO_COUNT(1), TRUE);
+	enableInterrupt();
+	printf("CPU speed = %d MHz\n", totalTSC / 10 / 1000 / 1000);
+}
+
+void showDateAndTime(const char* params)
+{
+	BYTE hour, minute, second, month, dayOfMonth, dayOfWeek;
+	WORD year;
+
+	readRTCTime(&hour, &minute, &second);
+	readRTCDate(&year, &month, &dayOfMonth, &dayOfWeek);
+	printf("%s %d %d %d:%d:%d %d\n",
+		convertDayOfWeekToString(dayOfWeek),
+		month, dayOfMonth, hour, minute, second, year);
 }

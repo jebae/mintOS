@@ -34,5 +34,10 @@ void cls(const char* params);
 void showTotalRAMSize(const char* params);
 void stringToDecimalHexTest(const char* params);
 void shutdown(const char* params);
+void setTimer(const char* params);
+void waitUsingPIT(const char* params);
+void readTimestampCounter(const char* params);
+void measureProcessorSpeed(const char* params);
+void showDateAndTime(const char* params);
 
 #endif

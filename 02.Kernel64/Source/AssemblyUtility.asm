@@ -4,6 +4,7 @@ SECTION .text
 
 global inPortByte, outPortByte, loadGDTR, loadTR, loadIDTR
 global enableInterrupt, disableInterrupt, readRFLAGS
+global readTSC
 
 ; PARAM: port number
 inPortByte:
@@ -55,3 +56,12 @@ readRFLAGS:
 	pushfq	; cannot read RFLAGS register directly, so use stack
 	pop rax	; rax is return value of function
 	ret
+
+readTSC:
+	push rdx
+	rdtsc	; save timestamp counter to rdx, rax
+	shl rdx, 32	; rdx << 32
+	or rax, rdx
+	pop rdx
+	ret
+

@@ -11,5 +11,6 @@ void loadIDTR(QWORD IDTRAddress);
 void enableInterrupt(void);
 void disableInterrupt(void);
 QWORD readRFLAGS(void);
+QWORD readTSC(void);
 
 #endif
