@@ -2,6 +2,7 @@
 #define __ASSEMBLY_UTILITY_H__
 
 #include "Types.h"
+#include "Task.h"
 
 BYTE inPortByte(WORD port);
 void outPortByte(WORD port, BYTE data);
@@ -12,5 +13,6 @@ void enableInterrupt(void);
 void disableInterrupt(void);
 QWORD readRFLAGS(void);
 QWORD readTSC(void);
+void switchContext(CONTEXT* current, CONTEXT* next);
 
 #endif

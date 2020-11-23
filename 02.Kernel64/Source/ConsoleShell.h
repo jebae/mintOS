@@ -39,5 +39,6 @@ void waitUsingPIT(const char* params);
 void readTimestampCounter(const char* params);
 void measureProcessorSpeed(const char* params);
 void showDateAndTime(const char* params);
+void createTestTask(const char* params);
 
 #endif

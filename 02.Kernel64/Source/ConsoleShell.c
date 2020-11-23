@@ -17,6 +17,7 @@ SHELL_COMMAND_ENTRY gCommandTable[] = {
 	{"rdtsc", "read timestamp counter", readTimestampCounter},
 	{"cpuspeed", "measure processor speed", measureProcessorSpeed},
 	{"date", "show date and time", showDateAndTime},
+	{"createtask", "create task", createTestTask},
 };
 
 void startConsoleShell(void)
@@ -278,4 +279,33 @@ void showDateAndTime(const char* params)
 	printf("%s %d %d %d:%d:%d %d\n",
 		convertDayOfWeekToString(dayOfWeek),
 		month, dayOfMonth, hour, minute, second, year);
+}
+
+static TCB task[2] = {0,};
+static QWORD stack[1024] = {0,};
+
+void testTask(void)
+{
+	int i = 0;
+
+	while (1)
+	{
+		printf("[%d] message from testTask. Press any key to switch\n", i++);
+		getch();
+		switchContext(&(task[1].context), &(task[0].context));
+	}
+}
+
+void createTestTask(const char* params)
+{
+	int i = 0;
+
+	setupTask(&task[1], 1, 0, (QWORD)testTask, &stack, sizeof(stack));
+	while (1)
+	{
+		printf("[%d] message from createTestTask. Press any key to switch\n", i++);
+		if (getch() == 'q')
+			break;
+		switchContext(&(task[0].context), &(task[1].context));
+	}
 }
