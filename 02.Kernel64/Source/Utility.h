@@ -4,6 +4,8 @@
 #include <stdarg.h>
 #include "Types.h"
 
+extern volatile QWORD gTickCount;
+
 void memset(void* dest, BYTE data, int size);
 int memcpy(void* dest, const void* src, int size);
 int memcmp(const void* a, const void* b, int size);
@@ -20,5 +22,6 @@ int hexToString(QWORD value, char* buf);
 int decimalToString(long value, char* buf);
 int sprintf(char* buf, const char* formatString, ...);
 int vsprintf(char* buf, const char* formatString, va_list ap);
+QWORD getTickCount(void);
 
 #endif

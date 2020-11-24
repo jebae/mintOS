@@ -1,6 +1,8 @@
 #include "Utility.h"
 #include "AssemblyUtility.h"
 
+volatile QWORD gTickCount = 0;
+
 void memset(void* dest, BYTE data, int size)
 {
 	for (int i=0; i < size; i++)
@@ -284,4 +286,9 @@ int vsprintf(char* buf, const char* formatString, va_list ap)
 	}
 	buf[idx] = '\0';
 	return idx;
+}
+
+QWORD getTickCount(void)
+{
+	return gTickCount;
 }

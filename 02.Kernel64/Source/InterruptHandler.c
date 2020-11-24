@@ -54,3 +54,21 @@ void keyboardHandler(int vecNum)
 	}
 	sendEOIToPIC(vecNum - PIC_IRQ_START_VECTOR);
 }
+
+void timerHandler(int vecNum)
+{
+	char buf[] = "[INT:  , ]";
+	static int gTimerInterruptCount = 0;
+
+	buf[5] = '0' + vecNum / 10;
+	buf[6] = '0' + vecNum % 10;
+	buf[8] = '0' + gTimerInterruptCount;
+	gTimerInterruptCount = (gTimerInterruptCount + 1) % 10;
+	printStringXY(70, 0, buf);
+
+	sendEOIToPIC(vecNum - PIC_IRQ_START_VECTOR);
+	gTickCount++;
+	decreaseProcessorTime();
+	if (isProcessorTimeExpired() == TRUE)
+		scheduleInInterrupt();
+}

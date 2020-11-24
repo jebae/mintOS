@@ -2,6 +2,8 @@
 #define __TASK_H__
 
 #include "Types.h"
+#include "List.h"
+#include "Utility.h"
 
 /*
  * SS, RSP, RFALGS, CS, RIP (5 registers which CPU save)
@@ -35,6 +37,13 @@
 #define TASK_RSP_OFFSET							22
 #define TASK_SS_OFFSET							23
 
+#define TASK_TCB_POOL_ADDRESS				0x800000 // after IST (0x700000 ~ 1MB)
+#define TASK_MAX_COUNT							1024
+#define TASK_STACK_POOL_ADDRESS			(TASK_TCB_POOL_ADDRESS + sizeof(TCB) * TASK_MAX_COUNT)
+#define TASK_STACK_SIZE							8192
+#define TASK_INVALID_ID							0xFFFFFFFFFFFFFFFF
+#define TASK_PROCESSOR_TIME					5 // 5ms
+
 #pragma pack(push, 1)
 
 typedef struct ContextStruct
@@ -44,16 +53,45 @@ typedef struct ContextStruct
 
 typedef struct TaskControlBlockStruct
 {
-	CONTEXT context;
-	QWORD id;
+	LISTLINK link;
 	QWORD flags;
+	CONTEXT context;
 	void* stackAddress;
 	QWORD stackSize;
 } TCB;
 
+typedef struct TCBPoolManagerStruct
+{
+	TCB* TCBPool;
+	int maxCount;
+	int useCount;
+	int allocatedCount; // use to make task id
+} TCB_POOL_MANAGER;
+
+typedef struct SchedulerStruct
+{
+	TCB* runningTask;
+	int processorTime;
+	LIST readyList;
+} SCHEDULER;
+
 #pragma pack(pop)
 
-void setupTask(TCB* tcb, QWORD id, QWORD flags, QWORD entryPointAddress,\
+void initTCBPool(void);
+TCB* allocateTCB(void);
+void freeTCB(QWORD id);
+TCB* createTask(QWORD flags, QWORD entryPointAddress);
+void setupTask(TCB* tcb, QWORD flags, QWORD entryPointAddress,\
 	void* stackAddress, QWORD stackSize);
+
+void initScheduler(void);
+void setRunningTask(TCB* task);
+TCB* getRunningTask(void);
+TCB* getNextTaskToRun(void);
+void addTaskToReadyList(TCB* task);
+void schedule(void);
+BOOL scheduleInInterrupt(void);
+void decreaseProcessorTime(void);
+BOOL isProcessorTimeExpired(void);
 
 #endif

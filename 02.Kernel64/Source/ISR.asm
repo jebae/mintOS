@@ -3,6 +3,7 @@
 SECTION .text
 
 extern commonExceptionHandler, commonInterruptHandler, keyboardHandler
+extern timerHandler
 
 ; exception ISR
 global ISRDivideError, ISRDebug, ISRNMI, ISRBreakPoint, ISROverflow
@@ -241,7 +242,7 @@ ISRETCException:
 ISRTimer:
 	SAVE_CONTEXT
 	mov rdi, 32
-	call commonInterruptHandler
+	call timerHandler
 	LOAD_CONTEXT
 	iretq
 

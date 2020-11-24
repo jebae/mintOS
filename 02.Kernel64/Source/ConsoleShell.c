@@ -17,7 +17,7 @@ SHELL_COMMAND_ENTRY gCommandTable[] = {
 	{"rdtsc", "read timestamp counter", readTimestampCounter},
 	{"cpuspeed", "measure processor speed", measureProcessorSpeed},
 	{"date", "show date and time", showDateAndTime},
-	{"createtask", "create task", createTestTask},
+	{"createtask", "create task, ex) createtask 1(type) 10(count)", createTestTask},
 };
 
 void startConsoleShell(void)
@@ -284,28 +284,94 @@ void showDateAndTime(const char* params)
 static TCB task[2] = {0,};
 static QWORD stack[1024] = {0,};
 
-void testTask(void)
+void testTask1(void)
 {
-	int i = 0;
+	BYTE data;
+	int i = 0, x = 0, y = 0, margin;
+	CHARACTER* screen = (CHARACTER*)CONSOLE_VIDEO_MEMORY_ADDRESS;
+	TCB* runningTask;
 
+	runningTask = getRunningTask();
+	margin = (runningTask->link.id & 0xFFFFFFFF) % 10;
 	while (1)
 	{
-		printf("[%d] message from testTask. Press any key to switch\n", i++);
-		getch();
-		switchContext(&(task[1].context), &(task[0].context));
+		switch (i)
+		{
+		case 0:
+			x++;
+			if (x >= CONSOLE_WIDTH - margin)
+				i = 1;
+			break;
+		case 1:
+			y++;
+			if (y >= CONSOLE_HEIGHT - margin)
+				i = 2;
+			break;
+		case 2:
+			x--;
+			if (x < margin)
+				i = 3;
+			break;
+		case 3:
+			y--;
+			if (y < margin)
+				i = 0;
+			break;
+		}
+		screen[y * CONSOLE_WIDTH + x].character = data;
+		screen[y * CONSOLE_WIDTH + x].attribute = data & 0x0F;
+		data++;
+		schedule();
+	}
+}
+
+void testTask2(void)
+{
+	int i = 0, offset;
+	CHARACTER* screen = (CHARACTER*)CONSOLE_VIDEO_MEMORY_ADDRESS;
+	TCB* runningTask;
+	char data[4] = {'-', '\\', '|', '/'};
+
+	runningTask = getRunningTask();
+	offset = (runningTask->link.id & 0xFFFFFFFF) * 2;
+	offset = CONSOLE_WIDTH * CONSOLE_HEIGHT - (offset % (CONSOLE_WIDTH * CONSOLE_HEIGHT));
+	while (1)
+	{
+		screen[offset].character = data[i % 4];
+		screen[offset].attribute = offset % 15 + 1;
+		i++;
+		schedule();
 	}
 }
 
 void createTestTask(const char* params)
 {
-	int i = 0;
+	PARAMETER_LIST paramList;
+	char type[30];
+	char count[30];
+	int i;
 
-	setupTask(&task[1], 1, 0, (QWORD)testTask, &stack, sizeof(stack));
-	while (1)
+	initParameter(&paramList, params);
+	getNextParameter(&paramList, type);
+	getNextParameter(&paramList, count);
+	switch (atoi(type, 10))
 	{
-		printf("[%d] message from createTestTask. Press any key to switch\n", i++);
-		if (getch() == 'q')
-			break;
-		switchContext(&(task[0].context), &(task[1].context));
+	case 1:
+		for (i=0; i < atoi(count, 10); i++)
+		{
+			if (createTask(0, (QWORD)testTask1) == NULL)
+				break;
+		}
+		printf("Task1 %d created\n", i);
+		break;
+	case 2:
+	default:
+		for (i=0; i < atoi(count, 10); i++)
+		{
+			if (createTask(0, (QWORD)testTask2) == NULL)
+				break;
+		}
+		printf("Task2 %d created\n", i);
+		break;
 	}
 }
