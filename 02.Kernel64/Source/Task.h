@@ -44,6 +44,22 @@
 #define TASK_INVALID_ID							0xFFFFFFFFFFFFFFFF
 #define TASK_PROCESSOR_TIME					5 // 5ms
 
+#define TASK_MAX_READY_LIST_COUNT		5
+#define TASK_FLAGS_HIGHEST					0
+#define TASK_FLAGS_HIGH							1
+#define TASK_FLAGS_MEDIUM						2
+#define TASK_FLAGS_LOW							3
+#define TASK_FLAGS_LOWEST						4
+#define TASK_FLAGS_WAIT							0xFF
+
+// task flag
+#define TASK_FLAGS_ENDTASK					0x8000000000000000
+#define TASK_FLAGS_IDLE							0x0800000000000000
+
+#define GET_PRIORITY(x) ((x) & 0xFF)
+#define SET_PRIORITY(x, priority) ((x) = ((x) & 0xFFFFFFFFFFFFFF00) | (priority))
+#define GET_TCB_OFFSET(x) ((x) & 0xFFFFFFFF)
+
 #pragma pack(push, 1)
 
 typedef struct ContextStruct
@@ -72,7 +88,11 @@ typedef struct SchedulerStruct
 {
 	TCB* runningTask;
 	int processorTime;
-	LIST readyList;
+	LIST readyList[TASK_MAX_READY_LIST_COUNT];
+	LIST waitList;
+	int executeCount[TASK_MAX_READY_LIST_COUNT];
+	QWORD processorLoad;
+	QWORD processorTimeSpentByIdleTask;
 } SCHEDULER;
 
 #pragma pack(pop)
@@ -88,10 +108,22 @@ void initScheduler(void);
 void setRunningTask(TCB* task);
 TCB* getRunningTask(void);
 TCB* getNextTaskToRun(void);
-void addTaskToReadyList(TCB* task);
+BOOL addTaskToReadyList(TCB* task);
 void schedule(void);
 BOOL scheduleInInterrupt(void);
 void decreaseProcessorTime(void);
 BOOL isProcessorTimeExpired(void);
+TCB* removeTaskFromReadyList(QWORD id);
+BOOL changePriority(QWORD id, BYTE priority);
+BOOL endTask(QWORD id);
+void exitTask(void);
+int getReadyTaskCount(void);
+int getTaskCount(void);
+TCB* getTCBInTCBPool(int offset);
+BOOL isTaskExist(QWORD id);
+QWORD getProcessorLoad(void);
+
+void idleTask(void);
+void haltProcessorByLoad(void);
 
 #endif

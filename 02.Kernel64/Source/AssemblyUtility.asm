@@ -5,7 +5,12 @@ SECTION .text
 global inPortByte, outPortByte, loadGDTR, loadTR, loadIDTR
 global enableInterrupt, disableInterrupt, readRFLAGS
 global readTSC
-global switchContext
+global switchContext, hlt
+
+hlt:
+	hlt
+	hlt
+	ret
 
 ; PARAM: port number
 inPortByte:

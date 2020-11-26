@@ -5,6 +5,7 @@
 #include "AssemblyUtility.h"
 #include "PIT.h"
 #include "RTC.h"
+#include "Task.h"
 
 SHELL_COMMAND_ENTRY gCommandTable[] = {
 	{"help", "show help", help},
@@ -18,6 +19,10 @@ SHELL_COMMAND_ENTRY gCommandTable[] = {
 	{"cpuspeed", "measure processor speed", measureProcessorSpeed},
 	{"date", "show date and time", showDateAndTime},
 	{"createtask", "create task, ex) createtask 1(type) 10(count)", createTestTask},
+	{"changepriority", "change task priority, ex) changepriority 1(id) 2(priority)", changeTaskPriority},
+	{"tasklist", "show task list", showTaskList},
+	{"killtask", "end task, ex) killtask 1(id)", killTask},
+	{"cpuload", "show processor load", cpuload},
 };
 
 void startConsoleShell(void)
@@ -121,7 +126,7 @@ int getNextParameter(PARAMETER_LIST* list, char* dest)
 	return len;
 }
 
-void help(const char* params)
+static void help(const char* params)
 {
 	int i;
 	int commandCount;
@@ -145,18 +150,18 @@ void help(const char* params)
 	}
 }
 
-void cls(const char* params)
+static void cls(const char* params)
 {
 	clearScreen();
 	setCursor(0, 1);
 }
 
-void showTotalRAMSize(const char* params)
+static void showTotalRAMSize(const char* params)
 {
 	printf("total RAM size = %dMB\n", getTotalRAMSize());
 }
 
-void stringToDecimalHexTest(const char* params)
+static void stringToDecimalHexTest(const char* params)
 {
 	PARAMETER_LIST paramList;
 	char param[100];
@@ -184,7 +189,7 @@ void stringToDecimalHexTest(const char* params)
 	}
 }
 
-void shutdown(const char* params)
+static void shutdown(const char* params)
 {
 	printf("System shutdown start...\n");
 	printf("Press any key to reboot...");
@@ -192,7 +197,7 @@ void shutdown(const char* params)
 	reboot();
 }
 
-void setTimer(const char* params)
+static void setTimer(const char* params)
 {
 	PARAMETER_LIST paramList;
 	char param[100];
@@ -216,7 +221,7 @@ void setTimer(const char* params)
 	printf("Time = %d ms, Periodic = %d, Change complete\n", ms, isPeriodic);
 }
 
-void waitUsingPIT(const char* params)
+static void waitUsingPIT(const char* params)
 {
 	PARAMETER_LIST paramList;
 	char param[100];
@@ -243,7 +248,7 @@ void waitUsingPIT(const char* params)
 	initPIT(MS_TO_COUNT(1), TRUE);
 }
 
-void readTimestampCounter(const char* params)
+static void readTimestampCounter(const char* params)
 {
 	QWORD tsc;
 
@@ -251,7 +256,7 @@ void readTimestampCounter(const char* params)
 	printf("timestamp counter: 0x%q\n", tsc);
 }
 
-void measureProcessorSpeed(const char* params)
+static void measureProcessorSpeed(const char* params)
 {
 	int i;
 	QWORD lastTSC, totalTSC = 0;
@@ -269,7 +274,7 @@ void measureProcessorSpeed(const char* params)
 	printf("CPU speed = %d MHz\n", totalTSC / 10 / 1000 / 1000);
 }
 
-void showDateAndTime(const char* params)
+static void showDateAndTime(const char* params)
 {
 	BYTE hour, minute, second, month, dayOfMonth, dayOfWeek;
 	WORD year;
@@ -284,16 +289,17 @@ void showDateAndTime(const char* params)
 static TCB task[2] = {0,};
 static QWORD stack[1024] = {0,};
 
-void testTask1(void)
+static void testTask1(void)
 {
 	BYTE data;
-	int i = 0, x = 0, y = 0, margin;
+	int i = 0, j;
+	int x = 0, y = 0, margin;
 	CHARACTER* screen = (CHARACTER*)CONSOLE_VIDEO_MEMORY_ADDRESS;
 	TCB* runningTask;
 
 	runningTask = getRunningTask();
 	margin = (runningTask->link.id & 0xFFFFFFFF) % 10;
-	while (1)
+	for (j=0; j < 20000; j++)
 	{
 		switch (i)
 		{
@@ -321,11 +327,12 @@ void testTask1(void)
 		screen[y * CONSOLE_WIDTH + x].character = data;
 		screen[y * CONSOLE_WIDTH + x].attribute = data & 0x0F;
 		data++;
-		schedule();
+		//schedule();
 	}
+	exitTask();
 }
 
-void testTask2(void)
+static void testTask2(void)
 {
 	int i = 0, offset;
 	CHARACTER* screen = (CHARACTER*)CONSOLE_VIDEO_MEMORY_ADDRESS;
@@ -340,11 +347,11 @@ void testTask2(void)
 		screen[offset].character = data[i % 4];
 		screen[offset].attribute = offset % 15 + 1;
 		i++;
-		schedule();
+		//schedule();
 	}
 }
 
-void createTestTask(const char* params)
+static void createTestTask(const char* params)
 {
 	PARAMETER_LIST paramList;
 	char type[30];
@@ -359,7 +366,7 @@ void createTestTask(const char* params)
 	case 1:
 		for (i=0; i < atoi(count, 10); i++)
 		{
-			if (createTask(0, (QWORD)testTask1) == NULL)
+			if (createTask(TASK_FLAGS_LOW, (QWORD)testTask1) == NULL)
 				break;
 		}
 		printf("Task1 %d created\n", i);
@@ -368,10 +375,84 @@ void createTestTask(const char* params)
 	default:
 		for (i=0; i < atoi(count, 10); i++)
 		{
-			if (createTask(0, (QWORD)testTask2) == NULL)
+			if (createTask(TASK_FLAGS_LOW, (QWORD)testTask2) == NULL)
 				break;
 		}
 		printf("Task2 %d created\n", i);
 		break;
 	}
+}
+
+static void changeTaskPriority(const char* params)
+{
+	PARAMETER_LIST paramList;
+	char idBuf[30];
+	char priorityBuf[30];
+	QWORD id;
+	BYTE priority;
+
+	initParameter(&paramList, params);
+	getNextParameter(&paramList, idBuf);
+	getNextParameter(&paramList, priorityBuf);
+	if (memcmp("0x", idBuf, 2) == 0)
+		id = atoi(idBuf + 2, 16);
+	else
+		id = atoi(idBuf, 10);
+	priority = atoi(priorityBuf, 10);
+	printf("change task priority id [0x%q] priority [%d] ", id, priority);
+	if (changePriority(id, priority) == TRUE)
+		printf("success\n");
+	else
+		printf("fail\n");
+}
+
+static void showTaskList(const char* params)
+{
+	int i;
+	int count = 0;
+	TCB* task;
+
+	printf("total task [%d]\n", getTaskCount());
+	for (i=0; i < TASK_MAX_COUNT; i++)
+	{
+		task = getTCBInTCBPool(i);
+		if ((task->link.id >> 32) == 0)
+			continue;
+		if (count != 0 && count % 10 == 0)
+		{
+			printf("Press any key to continue...('q' is exit): ");
+			if (getch() == 'q')
+			{
+				printf("\n");
+				break;
+			}
+			printf("\n");
+		}
+		printf("[%d] task id[0x%q], priority[%d], flags[0x%q]\n",
+			1 + count++, task->link.id, GET_PRIORITY(task->flags), task->flags);
+	}
+}
+
+static void killTask(const char* params)
+{
+	PARAMETER_LIST paramList;
+	char idBuf[30];
+	QWORD id;
+
+	initParameter(&paramList, params);
+	getNextParameter(&paramList, idBuf);
+	if (memcmp("0x", idBuf, 2) == 0)
+		id = atoi(idBuf + 2, 16);
+	else
+		id = atoi(idBuf, 10);
+	printf("kill task [0x%q] ", id);
+	if (endTask(id))
+		printf("success\n");
+	else
+		printf("fail\n");
+}
+
+static void cpuload(const char* params)
+{
+	printf("processor load: %d%%\n", getProcessorLoad());
 }

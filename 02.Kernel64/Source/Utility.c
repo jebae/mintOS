@@ -270,7 +270,7 @@ int vsprintf(char* buf, const char* formatString, va_list ap)
 				break;
 			case 'q':
 			case 'Q':
-			case 'P':
+			case 'p':
 				value = (QWORD)va_arg(ap, QWORD);
 				idx += itoa((long)value, buf + idx, 16);
 				break;

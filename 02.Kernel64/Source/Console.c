@@ -97,8 +97,10 @@ BYTE getch(void)
 
 	while (1)
 	{
-		if (!getKeyFromKeyQueue(&data))
-			continue;
+		while (!getKeyFromKeyQueue(&data))
+		{
+			schedule();
+		}
 		if (data.flags & KEY_FLAGS_DOWN)
 			return data.ASCIICode;
 	}

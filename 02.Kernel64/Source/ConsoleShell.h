@@ -27,18 +27,22 @@ typedef struct ParameterListStruct
 #pragma pack(pop)
 
 void startConsoleShell(void);
-void executeCommand(const char* command);
-void initParameter(PARAMETER_LIST* list, const char* parameter);
-void help(const char* params);
-void cls(const char* params);
-void showTotalRAMSize(const char* params);
-void stringToDecimalHexTest(const char* params);
-void shutdown(const char* params);
-void setTimer(const char* params);
-void waitUsingPIT(const char* params);
-void readTimestampCounter(const char* params);
-void measureProcessorSpeed(const char* params);
-void showDateAndTime(const char* params);
-void createTestTask(const char* params);
+static void executeCommand(const char* command);
+static void initParameter(PARAMETER_LIST* list, const char* parameter);
+static void help(const char* params);
+static void cls(const char* params);
+static void showTotalRAMSize(const char* params);
+static void stringToDecimalHexTest(const char* params);
+static void shutdown(const char* params);
+static void setTimer(const char* params);
+static void waitUsingPIT(const char* params);
+static void readTimestampCounter(const char* params);
+static void measureProcessorSpeed(const char* params);
+static void showDateAndTime(const char* params);
+static void createTestTask(const char* params);
+static void changeTaskPriority(const char* params);
+static void showTaskList(const char* params);
+static void killTask(const char* params);
+static void cpuload(const char* params);
 
 #endif

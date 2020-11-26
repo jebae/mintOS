@@ -2,6 +2,7 @@
 #include "Descriptor.h"
 #include "Utility.h"
 #include "AssemblyUtility.h"
+#include "Console.h"
 
 static SCHEDULER gScheduler;
 static TCB_POOL_MANAGER gTCBPoolManager;
@@ -47,9 +48,8 @@ TCB* allocateTCB(void)
 
 void freeTCB(QWORD id)
 {
-	int i;
+	int i = GET_TCB_OFFSET(id);
 
-	i = id & 0xFFFFFFFF; // lower 32bit role as index of TCB in pool
 	memset(&gTCBPoolManager.TCBPool[i], 0, sizeof(TCB));
 	gTCBPoolManager.TCBPool[i].link.id = i;
 	gTCBPoolManager.useCount--;
@@ -64,7 +64,7 @@ TCB* createTask(QWORD flags, QWORD entryPointAddress)
 	if (task == NULL)
 		return NULL;
 	stackAddress = (void*)(TASK_STACK_POOL_ADDRESS +\
-		TASK_STACK_SIZE * (task->link.id & 0xFFFFFFFF));
+		TASK_STACK_SIZE * GET_TCB_OFFSET(task->link.id));
 	setupTask(task, flags, entryPointAddress, stackAddress, TASK_STACK_SIZE);
 	addTaskToReadyList(task);
 	return task;
@@ -97,9 +97,20 @@ void setupTask(TCB* tcb, QWORD flags, QWORD entryPointAddress,\
 
 void initScheduler(void)
 {
+	int i;
+
 	initTCBPool();
-	initList(&gScheduler.readyList);
+	for (i=0; i < TASK_MAX_READY_LIST_COUNT; i++)
+	{
+		initList(&gScheduler.readyList[i]);
+		gScheduler.executeCount[i] = 0;
+	}
+	initList(&gScheduler.waitList);
 	gScheduler.runningTask = allocateTCB();
+	gScheduler.runningTask->flags = TASK_FLAGS_HIGHEST;
+
+	gScheduler.processorLoad = 0;
+	gScheduler.processorTimeSpentByIdleTask = 0;
 }
 
 void setRunningTask(TCB* task)
@@ -114,14 +125,82 @@ TCB* getRunningTask(void)
 
 TCB* getNextTaskToRun(void)
 {
-	if (getListCount(&gScheduler.readyList) == 0)
-		return NULL;
-	return (TCB*)removeListFromHeader(&gScheduler.readyList);
+	int i, j;
+	TCB* nextTask = NULL;
+
+	for (j=0; j < 2; j++)
+	{
+		for (i=0; i < TASK_MAX_READY_LIST_COUNT; i++)
+		{
+			if (gScheduler.executeCount[i] < getListCount(&gScheduler.readyList[i]))
+			{
+				nextTask = (TCB*)removeListFromHeader(&gScheduler.readyList[i]);
+				gScheduler.executeCount[i]++;
+				break;
+			}
+			else
+			{
+				gScheduler.executeCount[i] = 0;
+			}
+		}
+		if (nextTask != NULL)
+			break;
+	}
+	return nextTask;
 }
 
-void addTaskToReadyList(TCB* task)
+BOOL addTaskToReadyList(TCB* task)
 {
-	addListToTail(&gScheduler.readyList, task);
+	BYTE priority = GET_PRIORITY(task->flags);
+
+	if (priority >= TASK_MAX_READY_LIST_COUNT)
+		return FALSE;
+	addListToTail(&gScheduler.readyList[priority], task);
+	return TRUE;
+}
+
+TCB* removeTaskFromReadyList(QWORD id)
+{
+	TCB* target;
+	BYTE priority;
+
+	if (GET_TCB_OFFSET(id) >= TASK_MAX_COUNT)
+		return NULL;
+	target = getTCBInTCBPool(GET_TCB_OFFSET(id));
+	if (target->link.id != id)
+		return NULL;
+	priority = GET_PRIORITY(target->flags);
+	removeList(&gScheduler.readyList[priority], id);
+	return target;
+}
+
+BOOL changePriority(QWORD id, BYTE priority)
+{
+	TCB* target;
+
+	if (priority >= TASK_MAX_READY_LIST_COUNT)
+		return FALSE;
+	target = gScheduler.runningTask;
+	if (target->link.id == id)
+	{
+		SET_PRIORITY(target->flags, priority);
+	}
+	else
+	{
+		target = removeTaskFromReadyList(id);
+		if (target == NULL)
+		{
+			target = getTCBInTCBPool(GET_TCB_OFFSET(id));
+			if (target != NULL)
+				SET_PRIORITY(target->flags, priority);
+		}
+		else
+		{
+			SET_PRIORITY(target->flags, priority);
+			addTaskToReadyList(target);
+		}
+	}
+	return TRUE;
 }
 
 void schedule(void)
@@ -130,7 +209,7 @@ void schedule(void)
 	TCB* nextTask;
 	BOOL prevFlag;
 
-	if (getListCount(&gScheduler.readyList) == 0)
+	if (getReadyTaskCount() < 1)
 		return;
 	prevFlag = setInterruptFlag(FALSE);
 	nextTask = getNextTaskToRun();
@@ -140,10 +219,23 @@ void schedule(void)
 		return;
 	}
 	runningTask = getRunningTask();
-	addTaskToReadyList(runningTask);
-	gScheduler.processorTime = TASK_PROCESSOR_TIME;
 	gScheduler.runningTask = nextTask;
-	switchContext(&runningTask->context, &nextTask->context);
+	if ((runningTask->flags & TASK_FLAGS_IDLE) == TASK_FLAGS_IDLE)
+	{
+		gScheduler.processorTimeSpentByIdleTask +=\
+			TASK_PROCESSOR_TIME - gScheduler.processorTime;
+	}
+	if ((runningTask->flags & TASK_FLAGS_ENDTASK) == TASK_FLAGS_ENDTASK)
+	{
+		addListToTail(&gScheduler.waitList, runningTask);
+		switchContext(NULL, &nextTask->context);
+	}
+	else
+	{
+		addTaskToReadyList(runningTask);
+		switchContext(&runningTask->context, &nextTask->context);
+	}
+	gScheduler.processorTime = TASK_PROCESSOR_TIME;
 	setInterruptFlag(prevFlag);
 }
 
@@ -151,30 +243,165 @@ BOOL scheduleInInterrupt(void)
 {
 	TCB* runningTask;
 	TCB* nextTask;
-	char* context;
+	char* context = (char*)IST_START_ADDRESS + IST_SIZE - sizeof(CONTEXT);
 
-	if (getListCount(&gScheduler.readyList) == 0)
+	if (getReadyTaskCount() < 1)
 		return FALSE;
 	nextTask = getNextTaskToRun();
 	if (nextTask == NULL)
 		return FALSE;
-
-	/*
-	 * copy context from IST to runningTask context
-	 * cause ISR already did SAVE_CONTEXT to IST
-	 */
 	runningTask = getRunningTask();
-	context = (char*)IST_START_ADDRESS + IST_SIZE - sizeof(CONTEXT);
-	memcpy(&runningTask->context, context, sizeof(CONTEXT));
-	addTaskToReadyList(runningTask);
+	gScheduler.runningTask = nextTask;
+	if ((runningTask->flags & TASK_FLAGS_IDLE) == TASK_FLAGS_IDLE)
+		gScheduler.processorTimeSpentByIdleTask += TASK_PROCESSOR_TIME;
+	if ((runningTask->flags & TASK_FLAGS_ENDTASK) == TASK_FLAGS_ENDTASK)
+	{
+		addListToTail(&gScheduler.waitList, runningTask);
+	}
+	else
+	{
+		/*
+		 * copy context from IST to runningTask context
+		 * cause ISR already did SAVE_CONTEXT to IST
+		 */
+		memcpy(&runningTask->context, context, sizeof(CONTEXT));
+		addTaskToReadyList(runningTask);
+	}
 
 	/*
 	 * ISR will LOAD_CONTEXT, so before do that, save context to IST
 	 */
-	gScheduler.runningTask = nextTask;
 	memcpy(context, &nextTask->context, sizeof(CONTEXT));
 	gScheduler.processorTime = TASK_PROCESSOR_TIME;
 	return TRUE;
+}
+
+BOOL endTask(QWORD id)
+{
+	TCB* target;
+
+	if (GET_TCB_OFFSET(id) >= TASK_MAX_COUNT)
+		return FALSE;
+	target = gScheduler.runningTask;
+	if (target->link.id == id)
+	{
+		target->flags |= TASK_FLAGS_ENDTASK;
+		SET_PRIORITY(target->flags, TASK_FLAGS_WAIT);
+		schedule();
+
+		// never able to to run below code
+		while (1);
+	}
+	else
+	{
+		target = removeTaskFromReadyList(id);
+		if (target == NULL)
+		{
+			target = getTCBInTCBPool(GET_TCB_OFFSET(target->link.id));
+			if (target != NULL)
+			{
+				target->flags |= TASK_FLAGS_ENDTASK;
+				SET_PRIORITY(target->flags, TASK_FLAGS_WAIT);
+			}
+			return FALSE;
+		}
+		target->flags |= TASK_FLAGS_ENDTASK;
+		SET_PRIORITY(target->flags, TASK_FLAGS_WAIT);
+		addListToTail(&gScheduler.waitList, target);
+	}
+	return TRUE;
+}
+
+void exitTask(void)
+{
+	endTask(gScheduler.runningTask->link.id);
+}
+
+int getReadyTaskCount(void)
+{
+	int count = 0;
+	int i;
+
+	for (i=0; i < TASK_MAX_READY_LIST_COUNT; i++)
+		count += getListCount(&gScheduler.readyList[i]);
+	return count;
+}
+
+int getTaskCount(void)
+{
+	int count = getReadyTaskCount();
+
+	count += getListCount(&gScheduler.waitList);
+	if (gScheduler.runningTask != NULL)
+		count++;
+	return count;
+}
+
+TCB* getTCBInTCBPool(int offset)
+{
+	if (offset < 0 || offset >= TASK_MAX_COUNT)
+		return NULL;
+	return &gTCBPoolManager.TCBPool[offset];
+}
+
+BOOL isTaskExist(QWORD id)
+{
+	TCB* task = getTCBInTCBPool(GET_TCB_OFFSET(id));
+
+	if (task == NULL || task->link.id != id)
+		return FALSE;
+	return TRUE;
+}
+
+QWORD getProcessorLoad(void)
+{
+	return gScheduler.processorLoad;
+}
+
+void idleTask(void)
+{
+	TCB* task;
+	QWORD lastTotalTick, lastIdleTick;
+	QWORD currentTotalTick, currentIdleTick;
+
+	lastTotalTick = getTickCount();
+	lastIdleTick = gScheduler.processorTimeSpentByIdleTask;
+	while (1)
+	{
+		currentTotalTick = getTickCount();
+		currentIdleTick = gScheduler.processorTimeSpentByIdleTask;
+		if (currentTotalTick == lastTotalTick)
+		{
+			gScheduler.processorLoad = 0;
+		}
+		else
+		{
+			gScheduler.processorLoad = 100 -\
+				((currentIdleTick - lastIdleTick) * 100 / (currentTotalTick - lastTotalTick));
+		}
+		lastTotalTick = currentTotalTick;
+		lastIdleTick = currentIdleTick;
+		haltProcessorByLoad();
+		while (getListCount(&gScheduler.waitList) > 0)
+		{
+			task = (TCB*)removeListFromHeader(&gScheduler.waitList);
+			if (task == NULL)
+				continue;
+			printf("IDLE: TCB ID[0x%q] end\n", task->link.id);
+			freeTCB(task->link.id);
+		}
+		schedule();
+	}
+}
+
+void haltProcessorByLoad(void)
+{
+	if (gScheduler.processorLoad < 40)
+		hlt();
+	if (gScheduler.processorLoad < 80)
+		hlt();
+	if (gScheduler.processorLoad < 95)
+		hlt();
 }
 
 void decreaseProcessorTime(void)
@@ -187,3 +414,4 @@ BOOL isProcessorTimeExpired(void)
 {
 	return gScheduler.processorTime <= 0;
 }
+
