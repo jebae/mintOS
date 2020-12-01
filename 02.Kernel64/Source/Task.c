@@ -3,11 +3,12 @@
 #include "Utility.h"
 #include "AssemblyUtility.h"
 #include "Console.h"
+#include "Synchronization.h"
 
 static SCHEDULER gScheduler;
 static TCB_POOL_MANAGER gTCBPoolManager;
 
-void initTCBPool(void)
+static void initTCBPool(void)
 {
 	int i;
 
@@ -23,7 +24,7 @@ void initTCBPool(void)
 	gTCBPoolManager.allocatedCount = 1;
 }
 
-TCB* allocateTCB(void)
+static TCB* allocateTCB(void)
 {
 	int i;
 	TCB* emptyTCB;
@@ -46,7 +47,7 @@ TCB* allocateTCB(void)
 	return emptyTCB;
 }
 
-void freeTCB(QWORD id)
+static void freeTCB(QWORD id)
 {
 	int i = GET_TCB_OFFSET(id);
 
@@ -59,18 +60,28 @@ TCB* createTask(QWORD flags, QWORD entryPointAddress)
 {
 	TCB* task;
 	void* stackAddress;
+	BOOL prevInterruptFlag;
 
+	prevInterruptFlag = lockForSystemData();
 	task = allocateTCB();
 	if (task == NULL)
+	{
+		unlockForSystemData(prevInterruptFlag);
 		return NULL;
+	}
+	unlockForSystemData(prevInterruptFlag);
+
 	stackAddress = (void*)(TASK_STACK_POOL_ADDRESS +\
 		TASK_STACK_SIZE * GET_TCB_OFFSET(task->link.id));
 	setupTask(task, flags, entryPointAddress, stackAddress, TASK_STACK_SIZE);
+
+	prevInterruptFlag = lockForSystemData();
 	addTaskToReadyList(task);
+	unlockForSystemData(prevInterruptFlag);
 	return task;
 }
 
-void setupTask(TCB* tcb, QWORD flags, QWORD entryPointAddress,\
+static void setupTask(TCB* tcb, QWORD flags, QWORD entryPointAddress,\
 	void* stackAddress, QWORD stackSize)
 {
 	memset(tcb->context.registers, 0, sizeof(tcb->context.registers));
@@ -115,15 +126,25 @@ void initScheduler(void)
 
 void setRunningTask(TCB* task)
 {
+	BOOL prevInterruptFlag;
+
+	prevInterruptFlag = lockForSystemData();
 	gScheduler.runningTask = task;
+	unlockForSystemData(prevInterruptFlag);
 }
 
 TCB* getRunningTask(void)
 {
-	return gScheduler.runningTask;
+	BOOL prevInterruptFlag;
+	TCB* runningTask;
+
+	prevInterruptFlag = lockForSystemData();
+	runningTask = gScheduler.runningTask;
+	unlockForSystemData(prevInterruptFlag);
+	return runningTask;
 }
 
-TCB* getNextTaskToRun(void)
+static TCB* getNextTaskToRun(void)
 {
 	int i, j;
 	TCB* nextTask = NULL;
@@ -149,7 +170,7 @@ TCB* getNextTaskToRun(void)
 	return nextTask;
 }
 
-BOOL addTaskToReadyList(TCB* task)
+static BOOL addTaskToReadyList(TCB* task)
 {
 	BYTE priority = GET_PRIORITY(task->flags);
 
@@ -159,7 +180,7 @@ BOOL addTaskToReadyList(TCB* task)
 	return TRUE;
 }
 
-TCB* removeTaskFromReadyList(QWORD id)
+static TCB* removeTaskFromReadyList(QWORD id)
 {
 	TCB* target;
 	BYTE priority;
@@ -177,9 +198,12 @@ TCB* removeTaskFromReadyList(QWORD id)
 BOOL changePriority(QWORD id, BYTE priority)
 {
 	TCB* target;
+	BOOL prevInterruptFlag;
 
 	if (priority >= TASK_MAX_READY_LIST_COUNT)
 		return FALSE;
+
+	prevInterruptFlag = lockForSystemData();
 	target = gScheduler.runningTask;
 	if (target->link.id == id)
 	{
@@ -200,6 +224,7 @@ BOOL changePriority(QWORD id, BYTE priority)
 			addTaskToReadyList(target);
 		}
 	}
+	unlockForSystemData(prevInterruptFlag);
 	return TRUE;
 }
 
@@ -207,15 +232,15 @@ void schedule(void)
 {
 	TCB* runningTask;
 	TCB* nextTask;
-	BOOL prevFlag;
+	BOOL prevInterruptFlag;
 
 	if (getReadyTaskCount() < 1)
 		return;
-	prevFlag = setInterruptFlag(FALSE);
+	prevInterruptFlag = lockForSystemData();
 	nextTask = getNextTaskToRun();
 	if (nextTask == NULL)
 	{
-		setInterruptFlag(prevFlag);
+		unlockForSystemData(prevInterruptFlag);
 		return;
 	}
 	runningTask = getRunningTask();
@@ -236,7 +261,7 @@ void schedule(void)
 		switchContext(&runningTask->context, &nextTask->context);
 	}
 	gScheduler.processorTime = TASK_PROCESSOR_TIME;
-	setInterruptFlag(prevFlag);
+	unlockForSystemData(prevInterruptFlag);
 }
 
 BOOL scheduleInInterrupt(void)
@@ -244,16 +269,24 @@ BOOL scheduleInInterrupt(void)
 	TCB* runningTask;
 	TCB* nextTask;
 	char* context = (char*)IST_START_ADDRESS + IST_SIZE - sizeof(CONTEXT);
+	BOOL prevInterruptFlag;
 
 	if (getReadyTaskCount() < 1)
 		return FALSE;
+	prevInterruptFlag = lockForSystemData();
 	nextTask = getNextTaskToRun();
 	if (nextTask == NULL)
+	{
+		unlockForSystemData(prevInterruptFlag);
 		return FALSE;
+	}
 	runningTask = getRunningTask();
 	gScheduler.runningTask = nextTask;
+
 	if ((runningTask->flags & TASK_FLAGS_IDLE) == TASK_FLAGS_IDLE)
 		gScheduler.processorTimeSpentByIdleTask += TASK_PROCESSOR_TIME;
+	gScheduler.processorTime = TASK_PROCESSOR_TIME;
+
 	if ((runningTask->flags & TASK_FLAGS_ENDTASK) == TASK_FLAGS_ENDTASK)
 	{
 		addListToTail(&gScheduler.waitList, runningTask);
@@ -268,25 +301,28 @@ BOOL scheduleInInterrupt(void)
 		addTaskToReadyList(runningTask);
 	}
 
+	unlockForSystemData(prevInterruptFlag);
 	/*
 	 * ISR will LOAD_CONTEXT, so before do that, save context to IST
 	 */
 	memcpy(context, &nextTask->context, sizeof(CONTEXT));
-	gScheduler.processorTime = TASK_PROCESSOR_TIME;
 	return TRUE;
 }
 
 BOOL endTask(QWORD id)
 {
 	TCB* target;
+	BOOL prevInterruptFlag;
 
 	if (GET_TCB_OFFSET(id) >= TASK_MAX_COUNT)
 		return FALSE;
+	prevInterruptFlag = lockForSystemData();
 	target = gScheduler.runningTask;
 	if (target->link.id == id)
 	{
 		target->flags |= TASK_FLAGS_ENDTASK;
 		SET_PRIORITY(target->flags, TASK_FLAGS_WAIT);
+		unlockForSystemData(prevInterruptFlag);
 		schedule();
 
 		// never able to to run below code
@@ -303,12 +339,14 @@ BOOL endTask(QWORD id)
 				target->flags |= TASK_FLAGS_ENDTASK;
 				SET_PRIORITY(target->flags, TASK_FLAGS_WAIT);
 			}
-			return FALSE;
+			unlockForSystemData(prevInterruptFlag);
+			return TRUE;
 		}
 		target->flags |= TASK_FLAGS_ENDTASK;
 		SET_PRIORITY(target->flags, TASK_FLAGS_WAIT);
 		addListToTail(&gScheduler.waitList, target);
 	}
+	unlockForSystemData(prevInterruptFlag);
 	return TRUE;
 }
 
@@ -321,19 +359,25 @@ int getReadyTaskCount(void)
 {
 	int count = 0;
 	int i;
+	BOOL prevInterruptFlag;
 
+	prevInterruptFlag = lockForSystemData();
 	for (i=0; i < TASK_MAX_READY_LIST_COUNT; i++)
 		count += getListCount(&gScheduler.readyList[i]);
+	unlockForSystemData(prevInterruptFlag);
 	return count;
 }
 
 int getTaskCount(void)
 {
 	int count = getReadyTaskCount();
+	BOOL prevInterruptFlag;
 
+	prevInterruptFlag = lockForSystemData();
 	count += getListCount(&gScheduler.waitList);
 	if (gScheduler.runningTask != NULL)
 		count++;
+	unlockForSystemData(prevInterruptFlag);
 	return count;
 }
 
@@ -363,6 +407,7 @@ void idleTask(void)
 	TCB* task;
 	QWORD lastTotalTick, lastIdleTick;
 	QWORD currentTotalTick, currentIdleTick;
+	BOOL prevInterruptFlag;
 
 	lastTotalTick = getTickCount();
 	lastIdleTick = gScheduler.processorTimeSpentByIdleTask;
@@ -384,11 +429,16 @@ void idleTask(void)
 		haltProcessorByLoad();
 		while (getListCount(&gScheduler.waitList) > 0)
 		{
+			prevInterruptFlag = lockForSystemData();
 			task = (TCB*)removeListFromHeader(&gScheduler.waitList);
 			if (task == NULL)
-				continue;
-			printf("IDLE: TCB ID[0x%q] end\n", task->link.id);
+			{
+				unlockForSystemData(prevInterruptFlag);
+				break;
+			}
 			freeTCB(task->link.id);
+			unlockForSystemData(prevInterruptFlag);
+			printf("IDLE: TCB ID[0x%q] end\n", task->link.id);
 		}
 		schedule();
 	}

@@ -15,5 +15,6 @@ QWORD readRFLAGS(void);
 QWORD readTSC(void);
 void switchContext(CONTEXT* current, CONTEXT* next);
 void hlt(void);
+BOOL checkLockAndSet(volatile BYTE* dest, BYTE compare, BYTE src);
 
 #endif

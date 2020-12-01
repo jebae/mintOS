@@ -5,7 +5,7 @@ SECTION .text
 global inPortByte, outPortByte, loadGDTR, loadTR, loadIDTR
 global enableInterrupt, disableInterrupt, readRFLAGS
 global readTSC
-global switchContext, hlt
+global switchContext, hlt, checkLockAndSet
 
 hlt:
 	hlt
@@ -173,3 +173,20 @@ switchContext:
 								; set stack pointer to next task
 	LOAD_CONTEXT
 	iretq	; pop 5 registers (SS, RSP, ...)
+
+; PARAM: dest(rdi), compare(rsi), src(rdx)
+checkLockAndSet:
+	mov rax, rsi
+	lock cmpxchg byte[rdi], dl	; lock command makes other process to not access memory
+															; cmpxchg compare rax and first parameter
+															; if same, assign second parameter to first parameter
+															; if different, assign first parameter to rax
+	je .SUCCESS
+
+.NOT_SAME:
+	mov rax, 0x00
+	ret
+
+.SUCCESS:
+	mov rax, 0x01
+	ret

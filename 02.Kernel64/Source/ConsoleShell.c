@@ -6,6 +6,7 @@
 #include "PIT.h"
 #include "RTC.h"
 #include "Task.h"
+#include "Synchronization.h"
 
 SHELL_COMMAND_ENTRY gCommandTable[] = {
 	{"help", "show help", help},
@@ -21,8 +22,10 @@ SHELL_COMMAND_ENTRY gCommandTable[] = {
 	{"createtask", "create task, ex) createtask 1(type) 10(count)", createTestTask},
 	{"changepriority", "change task priority, ex) changepriority 1(id) 2(priority)", changeTaskPriority},
 	{"tasklist", "show task list", showTaskList},
-	{"killtask", "end task, ex) killtask 1(id)", killTask},
+	{"killtask", "end task, ex) killtask 1(id) or all", killTask},
 	{"cpuload", "show processor load", cpuload},
+	{"testmutex", "test mutex", testMutex},
+	{"deadlock", "test deadlock", testDeadlock},
 };
 
 void startConsoleShell(void)
@@ -438,10 +441,29 @@ static void killTask(const char* params)
 	PARAMETER_LIST paramList;
 	char idBuf[30];
 	QWORD id;
+	int i;
+	TCB* task;
 
 	initParameter(&paramList, params);
 	getNextParameter(&paramList, idBuf);
-	if (memcmp("0x", idBuf, 2) == 0)
+	if (memcmp("all", idBuf, 3) == 0)
+	{
+		for (i=2; i < TASK_MAX_COUNT; i++)
+		{
+			task = getTCBInTCBPool(i);
+			id = task->link.id;
+			if ((id >> 32) != 0)
+			{
+				printf("kill task [0x%q] ", id);
+				if (endTask(id))
+					printf("success\n");
+				else
+					printf("fail\n");
+			}
+		}
+		return;
+	}
+	else if (memcmp("0x", idBuf, 2) == 0)
 		id = atoi(idBuf + 2, 16);
 	else
 		id = atoi(idBuf, 10);
@@ -455,4 +477,99 @@ static void killTask(const char* params)
 static void cpuload(const char* params)
 {
 	printf("processor load: %d%%\n", getProcessorLoad());
+}
+
+static MUTEX gMutex;
+static volatile QWORD gAdder;
+
+static void printNumberTask(void)
+{
+	int i, j;
+	QWORD tickCount;
+
+	tickCount = getTickCount();
+	while (getTickCount() - tickCount < 50)
+		schedule();
+	for (i=0; i < 5; i++)
+	{
+		lock(&gMutex);
+		printf("ID[0x%Q] VALUE[%d]\n", getRunningTask()->link.id, gAdder);
+		gAdder++;
+		unlock(&gMutex);
+		for (j=0; j < 300000; j++);
+	}
+	tickCount = getTickCount();
+	while (getTickCount() - tickCount < 1000)
+		schedule();
+	exitTask();
+}
+
+static void testMutex(const char* params)
+{
+	int i;
+
+	gAdder = 1;
+	initMutex(&gMutex);
+	for (i=0; i < 3; i++)
+	{
+		createTask(TASK_FLAGS_LOW, (QWORD)printNumberTask);
+	}
+	printf("wait until %d task end...\n", i);
+	getch();
+}
+
+static MUTEX gMutexA;
+static MUTEX gMutexB;
+
+static void deadLock1()
+{
+	printf("1 start\n");
+
+	printf("1 lock A\n");
+	lock(&gMutexA);
+
+	for (int i=0; i < 9999999; i++);
+
+	printf("1 lock B\n");
+	lock(&gMutexB);
+
+	printf("1 unlock B\n");
+	unlock(&gMutexB);
+
+	printf("1 unlock A\n");
+	unlock(&gMutexA);
+
+	printf("1 end\n");
+	exitTask();
+}
+
+static void deadLock2()
+{
+	printf("2 start\n");
+
+	printf("2 lock B\n");
+	lock(&gMutexB);
+
+	printf("2 lock A\n");
+	lock(&gMutexA);
+
+	printf("2 unlock A\n");
+	unlock(&gMutexA);
+
+	printf("2 unlock B\n");
+	unlock(&gMutexB);
+
+	printf("2 end\n");
+	exitTask();
+}
+
+static void testDeadlock(const char* params)
+{
+	TCB* tasks[2];
+
+	initMutex(&gMutexA);
+	initMutex(&gMutexB);
+
+	tasks[0] = createTask(TASK_FLAGS_MEDIUM, (QWORD)deadLock1);
+	tasks[1] = createTask(TASK_FLAGS_MEDIUM, (QWORD)deadLock2);
 }

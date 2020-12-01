@@ -44,5 +44,7 @@ static void changeTaskPriority(const char* params);
 static void showTaskList(const char* params);
 static void killTask(const char* params);
 static void cpuload(const char* params);
+static void testMutex(const char* params);
+static void testDeadlock(const char* params);
 
 #endif

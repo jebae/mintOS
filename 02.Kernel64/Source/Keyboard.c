@@ -2,6 +2,7 @@
 #include "Utility.h"
 #include "Keyboard.h"
 #include "Queue.h"
+#include "Synchronization.h"
 
 // check data sent from keyboard
 BOOL isOutputBufferFull(void)
@@ -50,10 +51,10 @@ BOOL waitForACKAndPutOtherScanCode(void)
 BOOL activateKeyboard(void)
 {
 	int i, j;
-	BOOL previousInterrupt;
+	BOOL prevInterruptFlag;
 	BOOL res;
 
-	previousInterrupt = setInterruptFlag(FALSE);
+	prevInterruptFlag = setInterruptFlag(FALSE);
 
 	// 0xAE means activation command for keyboard controller
 	outPortByte(0x64, 0xAE);
@@ -73,7 +74,7 @@ BOOL activateKeyboard(void)
 	outPortByte(0x60, 0xF4);
 
 	res = waitForACKAndPutOtherScanCode();
-	setInterruptFlag(previousInterrupt);
+	setInterruptFlag(prevInterruptFlag);
 	return res;
 }
 
@@ -86,11 +87,11 @@ BYTE getKeyboardScanCode(void)
 BOOL changeKeyboardLED(BOOL capsLockOn, BOOL numLockOn, BOOL scrollLockOn)
 {
 	int i, j;
-	BOOL previousInterrupt;
+	BOOL prevInterruptFlag;
 	BOOL res;
 	BYTE data;
 
-	previousInterrupt = setInterruptFlag(FALSE);
+	prevInterruptFlag = setInterruptFlag(FALSE);
 
 	for (i=0; i < 0xFFFF; i++)
 	{
@@ -110,7 +111,7 @@ BOOL changeKeyboardLED(BOOL capsLockOn, BOOL numLockOn, BOOL scrollLockOn)
 	res = waitForACKAndPutOtherScanCode();
 	if (!res)
 	{
-		setInterruptFlag(previousInterrupt);
+		setInterruptFlag(prevInterruptFlag);
 		return FALSE;
 	}
 
@@ -122,7 +123,7 @@ BOOL changeKeyboardLED(BOOL capsLockOn, BOOL numLockOn, BOOL scrollLockOn)
 			break;
 	}
 	res = waitForACKAndPutOtherScanCode();
-	setInterruptFlag(previousInterrupt);
+	setInterruptFlag(prevInterruptFlag);
 	return res;
 }
 
@@ -277,14 +278,14 @@ BOOL convertScanCodeAndPutQueue(BYTE scanCode)
 {
 	KEY_DATA data;
 	BOOL res = FALSE;
-	BOOL previousInterrupt;
+	BOOL prevInterruptFlag;
 
 	data.scanCode = scanCode;
 	if (convertScanCodeToASCIICode(scanCode, &data.ASCIICode, &data.flags))
 	{
-		previousInterrupt = setInterruptFlag(FALSE);
+		prevInterruptFlag = lockForSystemData();
 		res = putQueue(&gKeyQueue, &data);
-		setInterruptFlag(previousInterrupt);
+		unlockForSystemData(prevInterruptFlag);
 	}
 	return res;
 }
@@ -292,13 +293,13 @@ BOOL convertScanCodeAndPutQueue(BYTE scanCode)
 BOOL getKeyFromKeyQueue(KEY_DATA* data)
 {
 	BOOL res;
-	BOOL previousInterrupt;
+	BOOL prevInterruptFlag;
 
 	if (isQueueEmpty(&gKeyQueue))
 		return FALSE;
-	previousInterrupt = setInterruptFlag(FALSE);
+	prevInterruptFlag = lockForSystemData();
 	res = getQueue(&gKeyQueue, data);
-	setInterruptFlag(previousInterrupt);
+	unlockForSystemData(prevInterruptFlag);
 	return res;
 }
 
