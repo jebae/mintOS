@@ -65,6 +65,7 @@ void Main(void)
 	enableInterrupt();
 	setCursor(45, y++);
 	printf("PASS\n");
-	createTask(TASK_FLAGS_LOWEST | TASK_FLAGS_IDLE, (QWORD)idleTask);
+	createTask(TASK_FLAGS_LOWEST | TASK_FLAGS_THREAD | TASK_FLAGS_SYSTEM | TASK_FLAGS_IDLE,\
+		0, 0, (QWORD)idleTask);
 	startConsoleShell();
 }

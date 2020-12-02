@@ -292,3 +292,12 @@ QWORD getTickCount(void)
 {
 	return gTickCount;
 }
+
+void sleep(QWORD millisecond)
+{
+	QWORD lastTickCount;
+
+	lastTickCount = gTickCount;
+	while (gTickCount - lastTickCount <= millisecond)
+		schedule();
+}

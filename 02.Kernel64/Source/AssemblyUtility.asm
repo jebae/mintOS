@@ -122,13 +122,13 @@ readTSC:
 	pop rbp
 %endmacro
 
-; PARAM: current context, next context
+; PARAM: current context(rdi), next context(rsi)
 switchContext:
 	push rbp
 	mov rbp, rsp
 
 	pushfq	; temporally save RFLAGS register cause cmp can change RFLAGS data
-	cmp rdi, 0	; rdi register have first parameter
+	cmp rdi, 0	; rdi is first parameter
 							; check if current context is null
 	je .LoadContext
 	popfq
@@ -140,9 +140,14 @@ switchContext:
 	mov qword[rdi + (23 * 8)], rax
 
 	; RSP
+	; current stack status
+	; --- data before call switchContext			---
+	; --- return address after switchContext	---
+	; --- rbp																	--- <- bp
+	; --- rax																	--- <- sp
 	mov rax, rbp
-	add rax, 16	; skip push rbp, return address
-	mov qword[rdi + (22 * 8)], rax
+	add rax, 16	; skip rbp, return address
+	mov qword[rdi + (22 * 8)], rax	; set rsp to location before switchContext
 
 	; RFLAGS
 	pushfq

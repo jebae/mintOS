@@ -23,5 +23,6 @@ int decimalToString(long value, char* buf);
 int sprintf(char* buf, const char* formatString, ...);
 int vsprintf(char* buf, const char* formatString, va_list ap);
 QWORD getTickCount(void);
+void sleep(QWORD millisecond);
 
 #endif

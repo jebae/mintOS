@@ -46,5 +46,8 @@ static void killTask(const char* params);
 static void cpuload(const char* params);
 static void testMutex(const char* params);
 static void testDeadlock(const char* params);
+static void createThreadTask(void);
+static void testThread(const char* params);
+static void showMatrix(const char* params);
 
 #endif

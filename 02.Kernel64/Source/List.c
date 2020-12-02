@@ -51,23 +51,21 @@ void* removeList(LIST* list, QWORD id)
 	LISTLINK* prev = NULL;
 	LISTLINK* cur = list->header;
 
-	while (cur != NULL)
+	while (cur != NULL && cur->id != id)
 	{
-		if (cur->id == id)
-		{
-			if (cur == list->header)
-				list->header = cur->next;
-			if (cur == list->tail)
-				list->tail = prev;
-			if (prev)
-				prev->next = cur->next;
-			list->itemCount--;
-			return cur;
-		}
 		prev = cur;
 		cur = cur->next;
 	}
-	return NULL;
+	if (cur == NULL)
+		return NULL;
+	if (cur == list->header)
+		list->header = cur->next;
+	if (cur == list->tail)
+		list->tail = prev;
+	if (prev)
+		prev->next = cur->next;
+	list->itemCount--;
+	return cur;
 }
 
 void* removeListFromHeader(LIST* list)

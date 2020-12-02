@@ -26,6 +26,8 @@ SHELL_COMMAND_ENTRY gCommandTable[] = {
 	{"cpuload", "show processor load", cpuload},
 	{"testmutex", "test mutex", testMutex},
 	{"deadlock", "test deadlock", testDeadlock},
+	{"testthread", "test thread and process", testThread},
+	{"matrix", "show matrix", showMatrix},
 };
 
 void startConsoleShell(void)
@@ -330,9 +332,7 @@ static void testTask1(void)
 		screen[y * CONSOLE_WIDTH + x].character = data;
 		screen[y * CONSOLE_WIDTH + x].attribute = data & 0x0F;
 		data++;
-		//schedule();
 	}
-	exitTask();
 }
 
 static void testTask2(void)
@@ -350,7 +350,6 @@ static void testTask2(void)
 		screen[offset].character = data[i % 4];
 		screen[offset].attribute = offset % 15 + 1;
 		i++;
-		//schedule();
 	}
 }
 
@@ -369,7 +368,7 @@ static void createTestTask(const char* params)
 	case 1:
 		for (i=0; i < atoi(count, 10); i++)
 		{
-			if (createTask(TASK_FLAGS_LOW, (QWORD)testTask1) == NULL)
+			if (createTask(TASK_FLAGS_LOW | TASK_FLAGS_THREAD, 0, 0, (QWORD)testTask1) == NULL)
 				break;
 		}
 		printf("Task1 %d created\n", i);
@@ -378,7 +377,7 @@ static void createTestTask(const char* params)
 	default:
 		for (i=0; i < atoi(count, 10); i++)
 		{
-			if (createTask(TASK_FLAGS_LOW, (QWORD)testTask2) == NULL)
+			if (createTask(TASK_FLAGS_LOW | TASK_FLAGS_THREAD, 0, 0, (QWORD)testTask2) == NULL)
 				break;
 		}
 		printf("Task2 %d created\n", i);
@@ -431,8 +430,11 @@ static void showTaskList(const char* params)
 			}
 			printf("\n");
 		}
-		printf("[%d] task id[0x%q], priority[%d], flags[0x%q]\n",
-			1 + count++, task->link.id, GET_PRIORITY(task->flags), task->flags);
+		printf("[%d] task id[0x%q], priority[%d], flags[0x%q], thread[%d]\n",
+			1 + count++, task->link.id, GET_PRIORITY(task->flags),
+			task->flags, getListCount(&task->childThreadList));
+		printf("	parent PID[0x%Q], memory address[0x%Q], size[0x%Q]\n",
+			task->parentProcessId, task->memoryAddress, task->memorySize);
 	}
 }
 
@@ -448,11 +450,11 @@ static void killTask(const char* params)
 	getNextParameter(&paramList, idBuf);
 	if (memcmp("all", idBuf, 3) == 0)
 	{
-		for (i=2; i < TASK_MAX_COUNT; i++)
+		for (i=0; i < TASK_MAX_COUNT; i++)
 		{
 			task = getTCBInTCBPool(i);
 			id = task->link.id;
-			if ((id >> 32) != 0)
+			if ((id >> 32) != 0 && (task->flags & TASK_FLAGS_SYSTEM) == 0)
 			{
 				printf("kill task [0x%q] ", id);
 				if (endTask(id))
@@ -467,11 +469,19 @@ static void killTask(const char* params)
 		id = atoi(idBuf + 2, 16);
 	else
 		id = atoi(idBuf, 10);
-	printf("kill task [0x%q] ", id);
-	if (endTask(id))
-		printf("success\n");
+	task = getTCBInTCBPool(GET_TCB_OFFSET(id));
+	if ((id >> 32) != 0 && (task->flags & TASK_FLAGS_SYSTEM) == 0)
+	{
+		printf("kill task [0x%q] ", id);
+		if (endTask(id))
+			printf("success\n");
+		else
+			printf("fail\n");
+	}
 	else
-		printf("fail\n");
+	{
+		printf("task does not exist or is system task\n");
+	}
 }
 
 static void cpuload(const char* params)
@@ -512,7 +522,7 @@ static void testMutex(const char* params)
 	initMutex(&gMutex);
 	for (i=0; i < 3; i++)
 	{
-		createTask(TASK_FLAGS_LOW, (QWORD)printNumberTask);
+		createTask(TASK_FLAGS_LOW | TASK_FLAGS_THREAD, 0, 0, (QWORD)printNumberTask);
 	}
 	printf("wait until %d task end...\n", i);
 	getch();
@@ -540,7 +550,6 @@ static void deadLock1()
 	unlock(&gMutexA);
 
 	printf("1 end\n");
-	exitTask();
 }
 
 static void deadLock2()
@@ -560,7 +569,6 @@ static void deadLock2()
 	unlock(&gMutexB);
 
 	printf("2 end\n");
-	exitTask();
 }
 
 static void testDeadlock(const char* params)
@@ -570,6 +578,100 @@ static void testDeadlock(const char* params)
 	initMutex(&gMutexA);
 	initMutex(&gMutexB);
 
-	tasks[0] = createTask(TASK_FLAGS_MEDIUM, (QWORD)deadLock1);
-	tasks[1] = createTask(TASK_FLAGS_MEDIUM, (QWORD)deadLock2);
+	tasks[0] = createTask(TASK_FLAGS_LOW | TASK_FLAGS_THREAD, 0, 0, (QWORD)deadLock1);
+	tasks[1] = createTask(TASK_FLAGS_LOW | TASK_FLAGS_THREAD, 0, 0, (QWORD)deadLock2);
+}
+
+static void createThreadTask(void)
+{
+	int i;
+
+	for (i=0; i < 3; i++)
+	{
+		createTask(TASK_FLAGS_LOW | TASK_FLAGS_THREAD, 0, 0, (QWORD)testTask2);
+	}
+	while (1)
+		sleep(1);
+}
+
+static void testThread(const char* params)
+{
+	TCB* process;
+
+	process = createTask(TASK_FLAGS_LOW | TASK_FLAGS_PROCESS, 0, 0, (QWORD)createThreadTask);
+	if (process == NULL)
+		printf("process create fail\n");
+	else
+		printf("process [0x%Q] create success\n", process->link.id);
+
+}
+
+static volatile QWORD gRandomValue = 0;
+
+QWORD random(void)
+{
+	gRandomValue = (gRandomValue * 412153 + 5571031) >> 16;
+	return gRandomValue;
+}
+
+static void dropCharactorThread(void)
+{
+	int x;
+	int i;
+	char text[2] = {0,};
+
+	x = random() % CONSOLE_WIDTH;
+	while (1)
+	{
+		sleep(random() % 20);
+		if (random() % 20 < 15)
+		{
+			text[0] = ' ';
+			for (i=0; i < CONSOLE_HEIGHT - 1; i++)
+			{
+				printStringXY(x, i, text);
+				sleep(50);
+			}
+		}
+		else
+		{
+			for (i=0; i < CONSOLE_HEIGHT - 1; i++)
+			{
+				text[0] = i + random();
+				printStringXY(x, i, text);
+				sleep(50);
+			}
+		}
+	}
+}
+
+static void matrixProcess(void)
+{
+	int i;
+
+	for (i=0; i < 300; i++)
+	{
+		if (createTask(TASK_FLAGS_LOW | TASK_FLAGS_THREAD, 0, 0, (QWORD)dropCharactorThread) == NULL)
+			break;
+		sleep(random() % 5 + 5);
+	}
+	printf("%d thread created\n", i);
+	getch();
+}
+
+static void showMatrix(const char* params)
+{
+	TCB* process;
+
+	process = createTask(TASK_FLAGS_LOW | TASK_FLAGS_PROCESS, 0, 0, (QWORD)matrixProcess);
+	if (process != NULL)
+	{
+		printf("matrix process [0x%Q] create success\n", process->link.id);
+		while ((process->link.id >> 32) != 0)
+			sleep(100);
+	}
+	else
+	{
+		printf("matrix process create fail\n");
+	}
 }

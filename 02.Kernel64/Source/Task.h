@@ -54,11 +54,15 @@
 
 // task flag
 #define TASK_FLAGS_ENDTASK					0x8000000000000000
+#define TASK_FLAGS_SYSTEM						0x4000000000000000
+#define TASK_FLAGS_PROCESS					0x2000000000000000
+#define TASK_FLAGS_THREAD						0x1000000000000000
 #define TASK_FLAGS_IDLE							0x0800000000000000
 
 #define GET_PRIORITY(x) ((x) & 0xFF)
 #define SET_PRIORITY(x, priority) ((x) = ((x) & 0xFFFFFFFFFFFFFF00) | (priority))
 #define GET_TCB_OFFSET(x) ((x) & 0xFFFFFFFF)
+#define GET_TCB_FROM_THREAD_LINK(x) (TCB*)((QWORD)(x) - offsetof(TCB, threadLink))
 
 #pragma pack(push, 1)
 
@@ -71,6 +75,11 @@ typedef struct TaskControlBlockStruct
 {
 	LISTLINK link;
 	QWORD flags;
+	void* memoryAddress;
+	QWORD memorySize;
+	LISTLINK threadLink;
+	LIST childThreadList;
+	QWORD parentProcessId;
 	CONTEXT context;
 	void* stackAddress;
 	QWORD stackSize;
@@ -100,7 +109,7 @@ typedef struct SchedulerStruct
 static void initTCBPool(void);
 static TCB* allocateTCB(void);
 static void freeTCB(QWORD id);
-TCB* createTask(QWORD flags, QWORD entryPointAddress);
+TCB* createTask(QWORD flags, void* memoryAddress, QWORD memorySize, QWORD entryPointAddress);
 static void setupTask(TCB* tcb, QWORD flags, QWORD entryPointAddress,\
 	void* stackAddress, QWORD stackSize);
 
@@ -122,6 +131,7 @@ int getTaskCount(void);
 TCB* getTCBInTCBPool(int offset);
 BOOL isTaskExist(QWORD id);
 QWORD getProcessorLoad(void);
+static TCB* getProcessByThread(TCB* thread);
 
 void idleTask(void);
 void haltProcessorByLoad(void);

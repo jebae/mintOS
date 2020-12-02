@@ -56,9 +56,9 @@ static void freeTCB(QWORD id)
 	gTCBPoolManager.useCount--;
 }
 
-TCB* createTask(QWORD flags, QWORD entryPointAddress)
+TCB* createTask(QWORD flags, void* memoryAddress, QWORD memorySize, QWORD entryPointAddress)
 {
-	TCB* task;
+	TCB* task, * process;
 	void* stackAddress;
 	BOOL prevInterruptFlag;
 
@@ -69,11 +69,33 @@ TCB* createTask(QWORD flags, QWORD entryPointAddress)
 		unlockForSystemData(prevInterruptFlag);
 		return NULL;
 	}
+	process = getProcessByThread(getRunningTask());
+	if (process == NULL)
+	{
+		freeTCB(task->link.id);
+		unlockForSystemData(prevInterruptFlag);
+		return NULL;
+	}
+	if (flags & TASK_FLAGS_THREAD)
+	{
+		task->memoryAddress = process->memoryAddress;
+		task->memorySize = process->memorySize;
+		addListToTail(&process->childThreadList, &task->threadLink);
+	}
+	else
+	{
+		task->memoryAddress = memoryAddress;
+		task->memorySize = memorySize;
+	}
+	task->parentProcessId = process->link.id;
+	task->threadLink.id = task->link.id;
 	unlockForSystemData(prevInterruptFlag);
 
 	stackAddress = (void*)(TASK_STACK_POOL_ADDRESS +\
 		TASK_STACK_SIZE * GET_TCB_OFFSET(task->link.id));
 	setupTask(task, flags, entryPointAddress, stackAddress, TASK_STACK_SIZE);
+
+	initList(&task->childThreadList);
 
 	prevInterruptFlag = lockForSystemData();
 	addTaskToReadyList(task);
@@ -86,8 +108,11 @@ static void setupTask(TCB* tcb, QWORD flags, QWORD entryPointAddress,\
 {
 	memset(tcb->context.registers, 0, sizeof(tcb->context.registers));
 
-	tcb->context.registers[TASK_RSP_OFFSET] = (QWORD)stackAddress + stackSize;
-	tcb->context.registers[TASK_RBP_OFFSET] = (QWORD)stackAddress + stackSize;
+	// set RSP, RBP forwarding 8byte to save exitTask 
+	tcb->context.registers[TASK_RSP_OFFSET] = (QWORD)stackAddress + stackSize - 8;
+	tcb->context.registers[TASK_RBP_OFFSET] = (QWORD)stackAddress + stackSize - 8;
+
+	*(QWORD*)((QWORD)stackAddress + stackSize - 8) = (QWORD)exitTask;
 
 	tcb->context.registers[TASK_CS_OFFSET] = GDT_KERNEL_CODE_SEGMENT;
 	tcb->context.registers[TASK_DS_OFFSET] = GDT_KERNEL_DATA_SEGMENT;
@@ -109,6 +134,7 @@ static void setupTask(TCB* tcb, QWORD flags, QWORD entryPointAddress,\
 void initScheduler(void)
 {
 	int i;
+	TCB* task;
 
 	initTCBPool();
 	for (i=0; i < TASK_MAX_READY_LIST_COUNT; i++)
@@ -117,8 +143,14 @@ void initScheduler(void)
 		gScheduler.executeCount[i] = 0;
 	}
 	initList(&gScheduler.waitList);
-	gScheduler.runningTask = allocateTCB();
-	gScheduler.runningTask->flags = TASK_FLAGS_HIGHEST;
+	task = allocateTCB();
+	gScheduler.runningTask = task;
+	task->flags = TASK_FLAGS_HIGHEST | TASK_FLAGS_PROCESS | TASK_FLAGS_SYSTEM;
+	task->parentProcessId = task->link.id;
+	task->memoryAddress = (void*)0x100000;
+	task->memorySize = 0x500000;
+	task->stackAddress = (void*)0x600000;
+	task->stackSize = 0x100000;
 
 	gScheduler.processorLoad = 0;
 	gScheduler.processorTimeSpentByIdleTask = 0;
@@ -402,9 +434,23 @@ QWORD getProcessorLoad(void)
 	return gScheduler.processorLoad;
 }
 
+static TCB* getProcessByThread(TCB* thread)
+{
+	TCB* process;
+
+	if (thread->flags & TASK_FLAGS_PROCESS)
+		return thread;
+	process = getTCBInTCBPool(GET_TCB_OFFSET(thread->parentProcessId));
+	if (process == NULL || process->link.id != thread->parentProcessId)
+		return NULL;
+	return process;
+}
+
 void idleTask(void)
 {
-	TCB* task;
+	int i, count;
+	TCB* task, * process;
+	LISTLINK* threadLink;
 	QWORD lastTotalTick, lastIdleTick;
 	QWORD currentTotalTick, currentIdleTick;
 	BOOL prevInterruptFlag;
@@ -435,6 +481,32 @@ void idleTask(void)
 			{
 				unlockForSystemData(prevInterruptFlag);
 				break;
+			}
+			if (task->flags & TASK_FLAGS_PROCESS)
+			{
+				count = getListCount(&task->childThreadList);
+				for (i=0; i < count; i++)
+				{
+					threadLink = (LISTLINK*)removeListFromHeader(&task->childThreadList);
+					endTask(threadLink->id);
+					addListToTail(&task->childThreadList, threadLink);
+				}
+				if (count > 0)
+				{
+					addListToTail(&gScheduler.waitList, task);
+					unlockForSystemData(prevInterruptFlag);
+					continue;
+				}
+				else
+				{
+					// TODO: free memory
+				}
+			}
+			else if (task->flags & TASK_FLAGS_THREAD)
+			{
+				process = getProcessByThread(task);
+				if (process != NULL)
+					removeList(&process->childThreadList, task->link.id);
 			}
 			freeTCB(task->link.id);
 			unlockForSystemData(prevInterruptFlag);
