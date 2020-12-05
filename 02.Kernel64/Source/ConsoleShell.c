@@ -28,6 +28,7 @@ SHELL_COMMAND_ENTRY gCommandTable[] = {
 	{"deadlock", "test deadlock", testDeadlock},
 	{"testthread", "test thread and process", testThread},
 	{"matrix", "show matrix", showMatrix},
+	{"testpie", "test pie calculation", testPie},
 };
 
 void startConsoleShell(void)
@@ -673,5 +674,57 @@ static void showMatrix(const char* params)
 	else
 	{
 		printf("matrix process create fail\n");
+	}
+}
+
+static void testFPUTask(void)
+{
+	double v1, v2;
+	TCB* task;
+	QWORD count, randomValue;
+	int i, offset;
+	char data[4] = {'-', '\\', '|', '/'};
+	CHARACTER* screen = (CHARACTER*)CONSOLE_VIDEO_MEMORY_ADDRESS;
+
+	task = getRunningTask();
+	offset = (task->link.id & 0xFFFFFFFF) * 2;
+	offset = (CONSOLE_WIDTH * CONSOLE_HEIGHT) - (offset % (CONSOLE_WIDTH * CONSOLE_HEIGHT));
+	while (1)
+	{
+		v1 = 1.0;
+		v2 = 1.0;
+		for (i=0; i < 10; i++)
+		{
+			randomValue = random();
+			v1 *= (double)randomValue;
+			v2 *= (double)randomValue;
+			sleep(1);
+			randomValue = random();
+			v1 /= (double)randomValue;
+			v2 /= (double)randomValue;
+		}
+		if (v1 != v2)
+		{
+			printf("value not same [%f] != [%f]\n", v1, v2);
+			break;
+		}
+		count++;
+		screen[offset].character = data[count % 4];
+		screen[offset].attribute = offset % 15 + 1;
+	}
+}
+
+static void testPie(const char* params)
+{
+	double res;
+	int i;
+
+	printf("pie calculation test\n");
+	printf("355 / 113 = ");
+	res = (double)355 / 113;
+	printf("%d.%d%d\n", (QWORD)res, (QWORD)(res * 10) % 10, (QWORD)(res * 100) % 10);
+	for (i=0; i < 100; i++)
+	{
+		createTask(TASK_FLAGS_LOW | TASK_FLAGS_THREAD, 0, 0, (QWORD)testFPUTask);
 	}
 }

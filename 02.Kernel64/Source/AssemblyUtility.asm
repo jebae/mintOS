@@ -6,6 +6,7 @@ global inPortByte, outPortByte, loadGDTR, loadTR, loadIDTR
 global enableInterrupt, disableInterrupt, readRFLAGS
 global readTSC
 global switchContext, hlt, checkLockAndSet
+global initFPU, saveFPUContext, loadFPUContext, setTS, clearTS
 
 hlt:
 	hlt
@@ -194,4 +195,30 @@ checkLockAndSet:
 
 .SUCCESS:
 	mov rax, 0x01
+	ret
+
+initFPU:
+	finit
+	ret
+
+; PARAM: context buffer address(rdi)
+saveFPUContext:
+	fxsave [rdi]
+	ret
+
+; PARAM: context buffer address(rdi)
+loadFPUContext:
+	fxrstor [rdi]
+	ret
+
+setTS:
+	push rax
+	mov rax, cr0
+	or rax, 0x08	; set TS bit 1
+	mov cr0, rax
+	pop rax
+	ret
+
+clearTS:
+	clts
 	ret

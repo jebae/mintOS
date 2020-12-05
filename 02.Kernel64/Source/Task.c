@@ -96,6 +96,7 @@ TCB* createTask(QWORD flags, void* memoryAddress, QWORD memorySize, QWORD entryP
 	setupTask(task, flags, entryPointAddress, stackAddress, TASK_STACK_SIZE);
 
 	initList(&task->childThreadList);
+	task->FPUUsed = FALSE;
 
 	prevInterruptFlag = lockForSystemData();
 	addTaskToReadyList(task);
@@ -154,6 +155,7 @@ void initScheduler(void)
 
 	gScheduler.processorLoad = 0;
 	gScheduler.processorTimeSpentByIdleTask = 0;
+	gScheduler.lastFPUUsedTaskId = TASK_INVALID_ID;
 }
 
 void setRunningTask(TCB* task)
@@ -206,6 +208,11 @@ static BOOL addTaskToReadyList(TCB* task)
 {
 	BYTE priority = GET_PRIORITY(task->flags);
 
+	if (priority == TASK_FLAGS_WAIT)
+	{
+		addListToTail(&gScheduler.waitList, task);
+		return TRUE;
+	}
 	if (priority >= TASK_MAX_READY_LIST_COUNT)
 		return FALSE;
 	addListToTail(&gScheduler.readyList[priority], task);
@@ -223,7 +230,7 @@ static TCB* removeTaskFromReadyList(QWORD id)
 	if (target->link.id != id)
 		return NULL;
 	priority = GET_PRIORITY(target->flags);
-	removeList(&gScheduler.readyList[priority], id);
+	target = removeList(&gScheduler.readyList[priority], id);
 	return target;
 }
 
@@ -275,14 +282,24 @@ void schedule(void)
 		unlockForSystemData(prevInterruptFlag);
 		return;
 	}
-	runningTask = getRunningTask();
+	runningTask = gScheduler.runningTask;
 	gScheduler.runningTask = nextTask;
 	if ((runningTask->flags & TASK_FLAGS_IDLE) == TASK_FLAGS_IDLE)
 	{
 		gScheduler.processorTimeSpentByIdleTask +=\
 			TASK_PROCESSOR_TIME - gScheduler.processorTime;
 	}
-	if ((runningTask->flags & TASK_FLAGS_ENDTASK) == TASK_FLAGS_ENDTASK)
+
+	/*
+	 * set TS bit of CR0 to 1 if next task is not last task
+	 * which used FPU (need FPU context switching)
+	 */
+	if (gScheduler.lastFPUUsedTaskId != nextTask->link.id)
+		setTS();
+	else
+		clearTS();
+
+	if (runningTask->flags & TASK_FLAGS_ENDTASK)
 	{
 		addListToTail(&gScheduler.waitList, runningTask);
 		switchContext(NULL, &nextTask->context);
@@ -292,6 +309,7 @@ void schedule(void)
 		addTaskToReadyList(runningTask);
 		switchContext(&runningTask->context, &nextTask->context);
 	}
+
 	gScheduler.processorTime = TASK_PROCESSOR_TIME;
 	unlockForSystemData(prevInterruptFlag);
 }
@@ -317,9 +335,8 @@ BOOL scheduleInInterrupt(void)
 
 	if ((runningTask->flags & TASK_FLAGS_IDLE) == TASK_FLAGS_IDLE)
 		gScheduler.processorTimeSpentByIdleTask += TASK_PROCESSOR_TIME;
-	gScheduler.processorTime = TASK_PROCESSOR_TIME;
 
-	if ((runningTask->flags & TASK_FLAGS_ENDTASK) == TASK_FLAGS_ENDTASK)
+	if (runningTask->flags & TASK_FLAGS_ENDTASK)
 	{
 		addListToTail(&gScheduler.waitList, runningTask);
 	}
@@ -334,10 +351,21 @@ BOOL scheduleInInterrupt(void)
 	}
 
 	unlockForSystemData(prevInterruptFlag);
+
+	/*
+	 * set TS bit of CR0 to 1 if next task is not last task
+	 * which used FPU (need FPU context switching)
+	 */
+	if (gScheduler.lastFPUUsedTaskId != nextTask->link.id)
+		setTS();
+	else
+		clearTS();
+
 	/*
 	 * ISR will LOAD_CONTEXT, so before do that, save context to IST
 	 */
 	memcpy(context, &nextTask->context, sizeof(CONTEXT));
+	gScheduler.processorTime = TASK_PROCESSOR_TIME;
 	return TRUE;
 }
 
@@ -346,8 +374,6 @@ BOOL endTask(QWORD id)
 	TCB* target;
 	BOOL prevInterruptFlag;
 
-	if (GET_TCB_OFFSET(id) >= TASK_MAX_COUNT)
-		return FALSE;
 	prevInterruptFlag = lockForSystemData();
 	target = gScheduler.runningTask;
 	if (target->link.id == id)
@@ -365,7 +391,7 @@ BOOL endTask(QWORD id)
 		target = removeTaskFromReadyList(id);
 		if (target == NULL)
 		{
-			target = getTCBInTCBPool(GET_TCB_OFFSET(target->link.id));
+			target = getTCBInTCBPool(GET_TCB_OFFSET(id));
 			if (target != NULL)
 			{
 				target->flags |= TASK_FLAGS_ENDTASK;
@@ -424,7 +450,7 @@ BOOL isTaskExist(QWORD id)
 {
 	TCB* task = getTCBInTCBPool(GET_TCB_OFFSET(id));
 
-	if (task == NULL || task->link.id != id)
+	if ((task == NULL) || (task->link.id != id))
 		return FALSE;
 	return TRUE;
 }
@@ -537,3 +563,12 @@ BOOL isProcessorTimeExpired(void)
 	return gScheduler.processorTime <= 0;
 }
 
+QWORD getLastFPUUsedTaskId(void)
+{
+	return gScheduler.lastFPUUsedTaskId;
+}
+
+void setLastFPUUsedTaskId(QWORD id)
+{
+	gScheduler.lastFPUUsedTaskId = id;
+}

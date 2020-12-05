@@ -78,11 +78,14 @@ typedef struct TaskControlBlockStruct
 	void* memoryAddress;
 	QWORD memorySize;
 	LISTLINK threadLink;
-	LIST childThreadList;
 	QWORD parentProcessId;
+	QWORD FPUContext[512 / 8];
+	LIST childThreadList;
 	CONTEXT context;
 	void* stackAddress;
 	QWORD stackSize;
+	BOOL FPUUsed;
+	char padding[11];
 } TCB;
 
 typedef struct TCBPoolManagerStruct
@@ -102,6 +105,7 @@ typedef struct SchedulerStruct
 	int executeCount[TASK_MAX_READY_LIST_COUNT];
 	QWORD processorLoad;
 	QWORD processorTimeSpentByIdleTask;
+	QWORD lastFPUUsedTaskId;
 } SCHEDULER;
 
 #pragma pack(pop)
@@ -135,5 +139,8 @@ static TCB* getProcessByThread(TCB* thread);
 
 void idleTask(void);
 void haltProcessorByLoad(void);
+
+QWORD getLastFPUUsedTaskId(void);
+void setLastFPUUsedTaskId(QWORD id);
 
 #endif

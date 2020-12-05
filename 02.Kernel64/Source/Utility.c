@@ -235,11 +235,12 @@ int sprintf(char* buf, const char* formatString, ...)
 
 int vsprintf(char* buf, const char* formatString, va_list ap)
 {
-	QWORD i;
+	QWORD i, k;
 	int idx = 0;
 	int formatLen, copyLen;
 	char* copy;
 	QWORD value;
+	double doubleValue;
 
 	formatLen = strlen(formatString);
 	for (i=0; i < formatLen; i++)
@@ -273,6 +274,21 @@ int vsprintf(char* buf, const char* formatString, va_list ap)
 			case 'p':
 				value = (QWORD)va_arg(ap, QWORD);
 				idx += itoa((long)value, buf + idx, 16);
+				break;
+			case 'f':
+				doubleValue = (double)va_arg(ap, double);
+				doubleValue += 0.005;
+				buf[idx] = '0' + (QWORD)(doubleValue * 100) % 10;
+				buf[idx + 1] = '0' + (QWORD)(doubleValue * 10) % 10;
+				buf[idx + 2] = '.';
+				k = 0;
+				do {
+					buf[idx + 3 + k++] = '0' + (QWORD)doubleValue % 10;
+					doubleValue /= 10;
+				} while ((QWORD)doubleValue > 0);
+				buf[idx + 3 + k] = '\0';
+				reverseString(buf + idx);
+				idx += 3 + k;
 				break;
 			default:
 				buf[idx++] = formatString[i];

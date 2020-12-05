@@ -49,5 +49,6 @@ static void testDeadlock(const char* params);
 static void createThreadTask(void);
 static void testThread(const char* params);
 static void showMatrix(const char* params);
+static void testPie(const char* params);
 
 #endif

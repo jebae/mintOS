@@ -16,5 +16,10 @@ QWORD readTSC(void);
 void switchContext(CONTEXT* current, CONTEXT* next);
 void hlt(void);
 BOOL checkLockAndSet(volatile BYTE* dest, BYTE compare, BYTE src);
+void initFPU(void);
+void saveFPUContext(void* FPUContext);
+void loadFPUContext(void* FPUContext);
+void setTS(void);
+void clearTS(void);
 
 #endif

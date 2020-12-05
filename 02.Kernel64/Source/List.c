@@ -66,8 +66,7 @@ void* removeList(LIST* list, QWORD id)
 		prev->next = cur->next;
 	list->itemCount--;
 	return cur;
-}
-
+} 
 void* removeListFromHeader(LIST* list)
 {
 	LISTLINK* link;

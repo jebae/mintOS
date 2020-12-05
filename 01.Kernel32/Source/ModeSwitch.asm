@@ -41,9 +41,9 @@ readCPUID:
 ; PARAMS: none
 switchAndExecute64bitKernel:
 
-	; set CR4 PAE bit 1
+	; set CR4 PAE bit 1, OSXMMEXCPT bit 1, OSFXSR bit 1
 	mov eax, cr4
-	or eax, 0x20
+	or eax, 0x620	; PAE (5), OSXMMEXCPT (10), OSFXSR (9) to 1
 	mov cr4, eax
 
 	; set CR3 PML4 address
@@ -58,8 +58,8 @@ switchAndExecute64bitKernel:
 
 	; set CR0 register and activate paging, caching
 	mov eax, cr0
-	or eax, 0xE0000000	; set NW(29), CD(30), PG(31) to 1
-	xor eax, 0x60000000	; set NW, CD to 0
+	or eax, 0xE000000E	; set NW(29), CD(30), PG(31), TS(3), EM(2), MP(1) to 1
+	xor eax, 0x60000004	; set NW, CD, EM to 0
 	mov cr0, eax
 
 	jmp 0x08:0x200000	; set CS segment selector to IA-32e code segment descriptor

@@ -10,5 +10,6 @@ void commonExceptionHandler(int vecNum, QWORD errCode);
 void commonInterruptHandler(int vecNum);
 void keyboardHandler(int vecNum);
 void timerHandler(int vecNum);
+void deviceNotAvailableHandler(int vecNum);
 
 #endif

@@ -3,7 +3,7 @@
 SECTION .text
 
 extern commonExceptionHandler, commonInterruptHandler, keyboardHandler
-extern timerHandler
+extern timerHandler, deviceNotAvailableHandler
 
 ; exception ISR
 global ISRDivideError, ISRDebug, ISRNMI, ISRBreakPoint, ISROverflow
@@ -129,7 +129,7 @@ ISRInvalidOpcode:
 ISRDeviceNotAvailable:
 	SAVE_CONTEXT
 	mov rdi, 7
-	call commonExceptionHandler
+	call deviceNotAvailableHandler
 	LOAD_CONTEXT
 	iretq
 

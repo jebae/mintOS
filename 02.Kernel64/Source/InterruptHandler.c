@@ -2,6 +2,7 @@
 #include "PIC.h"
 #include "Keyboard.h"
 #include "Console.h"
+#include "AssemblyUtility.h"
 
 void commonExceptionHandler(int vecNum, QWORD errCode)
 {
@@ -71,4 +72,42 @@ void timerHandler(int vecNum)
 	decreaseProcessorTime();
 	if (isProcessorTimeExpired() == TRUE)
 		scheduleInInterrupt();
+}
+
+void deviceNotAvailableHandler(int vecNum)
+{
+	TCB* lastFPUUsedTask, * currentTask;
+	QWORD lastFPUUsedTaskId;
+	char buf[] = "[EXC:  , ]";
+	static int gFPUInterruptCount = 0;
+
+	buf[5] = '0' + vecNum / 10;
+	buf[6] = '0' + vecNum % 10;
+	buf[8] = '0' + gFPUInterruptCount;
+	gFPUInterruptCount = (gFPUInterruptCount + 1) % 10;
+	printStringXY(0, 0, buf);
+
+	clearTS();
+	lastFPUUsedTaskId = getLastFPUUsedTaskId();
+	currentTask = getRunningTask();
+
+	// save last FPU used tasks's FPU context if exist
+	if (lastFPUUsedTaskId != TASK_INVALID_ID)
+	{
+		lastFPUUsedTask = getTCBInTCBPool(GET_TCB_OFFSET(lastFPUUsedTaskId));
+		if (lastFPUUsedTask != NULL && lastFPUUsedTask->link.id == lastFPUUsedTaskId)
+			saveFPUContext(lastFPUUsedTask->FPUContext);
+	}
+
+	// load or init currentTask FPU context
+	if (currentTask->FPUUsed)
+	{
+		loadFPUContext(currentTask->FPUContext);
+	}
+	else
+	{
+		initFPU();
+		currentTask->FPUUsed = TRUE;
+	}
+	setLastFPUUsedTaskId(currentTask->link.id);
 }
