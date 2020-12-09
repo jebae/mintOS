@@ -8,6 +8,7 @@
 #include "Task.h"
 #include "Console.h"
 #include "ConsoleShell.h"
+#include "DynamicMemory.h"
 
 void Main(void)
 {
@@ -40,9 +41,14 @@ void Main(void)
 	setCursor(26, y++);
 	printf("PASS], Size = %dMB\n", getTotalRAMSize());
 
-	printf("TCB Pool And Scheduler initialize.....[PASS]\n");
+	printf("TCB Pool And Scheduler Initialize.....[PASS]\n");
 	y++;
 	initScheduler();
+
+	printf("Dynamic Memory Initialize.....[PASS]\n");
+	y++;
+	initDynamicMemory();
+
 	initPIT(MS_TO_COUNT(1), 1);
 
 	printf("Keyboard Activate And Queue Initialize.....[    ]");

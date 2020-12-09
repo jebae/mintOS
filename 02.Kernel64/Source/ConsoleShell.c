@@ -7,6 +7,7 @@
 #include "RTC.h"
 #include "Task.h"
 #include "Synchronization.h"
+#include "DynamicMemory.h"
 
 SHELL_COMMAND_ENTRY gCommandTable[] = {
 	{"help", "show help", help},
@@ -29,6 +30,9 @@ SHELL_COMMAND_ENTRY gCommandTable[] = {
 	{"testthread", "test thread and process", testThread},
 	{"matrix", "show matrix", showMatrix},
 	{"testpie", "test pie calculation", testPie},
+	{"dynamicraminfo", "show dynamic memory information", showDynamicMemoryInformation},
+	{"testseqalloc", "test sequential allocation & free", testSequentialAllocation},
+	{"testranalloc", "test random allocation & free", testRandomAllocation},
 };
 
 void startConsoleShell(void)
@@ -149,6 +153,16 @@ static void help(const char* params)
 
 	for (i=0; i < commandCount; i++)
 	{
+		if (i != 0 && i % 20 == 0)
+		{
+			printf("press any key to continue...('q' is exit) : ");
+			if (getch() == 'q')
+			{
+				printf("\n");
+				break;
+			}
+			printf("\n");
+		}
 		printf("%s", gCommandTable[i].command);
 		getCursor(&x, &y);
 		setCursor(maxLen, y);
@@ -726,5 +740,123 @@ static void testPie(const char* params)
 	for (i=0; i < 100; i++)
 	{
 		createTask(TASK_FLAGS_LOW | TASK_FLAGS_THREAD, 0, 0, (QWORD)testFPUTask);
+	}
+}
+
+static void showDynamicMemoryInformation(const char* params)
+{
+	QWORD startAddress, totalSize, metaSize, usedSize;
+
+	getDynamicMemoryInfo(&startAddress, &totalSize, &metaSize, &usedSize);
+	printf("=========== Dynamic Memory Information ===========\n");
+	printf("start address: [0x%Q]\n", startAddress);
+	printf("total size: [0x%Q]byte, [%d]MB\n", totalSize, totalSize / (1 << 20));
+	printf("meta size: [0x%Q]byte, [%d]KB\n", metaSize, metaSize / (1 << 10));
+	printf("used size: [0x%Q]byte, [%d]KB\n", usedSize, usedSize / (1 << 10));
+}
+
+static void testSequentialAllocation(const char* params)
+{
+	DYNAMICMEMORY* dynamicMemory = getDynamicMemoryManager();
+	QWORD* buf;
+	int i, j, k;
+
+	printf("=========== Dynamic Memory Test ===========\n");
+	for (i=0; i < dynamicMemory->maxLevelCount; i++)
+	{
+		printf("block list [%d] test start\n", i);
+		printf("allocation and compare: ");
+		for (j=0; j < (dynamicMemory->blockCountOfSmallestBlock >> i); j++)
+		{
+			buf = allocateMemory(DYNAMIC_MEMORY_MIN_SIZE << i);
+			if (buf == NULL)
+			{
+				printf("\nallocation fail\n");
+				return;
+			}
+			for (k=0; k < (DYNAMIC_MEMORY_MIN_SIZE << i) / 8; k++)
+			{
+				buf[k] = k;
+			}
+			for (k=0; k < (DYNAMIC_MEMORY_MIN_SIZE << i) / 8; k++)
+			{
+				if (buf[k] != k)
+				{
+					printf("\ncompare fail\n");
+					return;
+				}
+			}
+			printf(".");
+		}
+		printf("\nfree: ");
+		for (j=0; j < (dynamicMemory->blockCountOfSmallestBlock >> i); j++)
+		{
+			if (freeMemory((void*)(dynamicMemory->startAddress +\
+				(DYNAMIC_MEMORY_MIN_SIZE << i) * j)) == FALSE)
+			{
+				printf("\nfree fail\n");
+				return;
+			}
+			printf(".");
+		}
+		printf("\n");
+	}
+	printf("test complete\n");
+}
+
+static void randomAllocationTask(void)
+{
+	TCB* task;
+	QWORD memorySize;
+	char strBuffer[200];
+	BYTE* buf;
+	int i, j, y;
+
+	task = getRunningTask();
+	y = task->link.id % 15 + 9;
+	for (i=0; i < 10; i++)
+	{
+		do {
+			memorySize = ((random() % (32 * 1024)) + 1) * 1024;
+			buf = allocateMemory(memorySize);
+			if (buf == NULL)
+				sleep(1);
+		} while (buf == NULL);
+		sprintf(strBuffer, "|address: [0x%Q] size: [0x%Q] allocation success", buf, memorySize);
+		printStringXY(20, y, strBuffer);
+		sleep(200);
+
+		sprintf(strBuffer, "|address: [0x%Q] size: [0x%Q] data write...", buf, memorySize);
+		printStringXY(20, y, strBuffer);
+		for (j=0; j < memorySize / 2; j++)
+		{
+			buf[j] = random() & 0xFF;
+			buf[j + memorySize / 2] = buf[j];
+		}
+		sleep(200);
+
+		sprintf(strBuffer, "|address: [0x%Q] size: [0x%Q] data verify...", buf, memorySize);
+		printStringXY(20, y, strBuffer);
+		for (j=0; j < memorySize / 2; j++)
+		{
+			if (buf[j] != buf[j + memorySize / 2])
+			{
+				printf("task id [0x%Q] verify fail\n", task->link.id);
+				exitTask();
+			}
+		}
+		freeMemory(buf);
+		sleep(200);
+	}
+	exitTask();
+}
+
+static void testRandomAllocation(const char* params)
+{
+	int i;
+
+	for (i=0; i < 1000; i++)
+	{
+		createTask(TASK_FLAGS_LOWEST | TASK_FLAGS_THREAD, 0, 0, (QWORD)randomAllocationTask);
 	}
 }

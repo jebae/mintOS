@@ -50,5 +50,9 @@ static void createThreadTask(void);
 static void testThread(const char* params);
 static void showMatrix(const char* params);
 static void testPie(const char* params);
+static void showDynamicMemoryInformation(const char* params);
+static void testSequentialAllocation(const char* params);
+static void randomAllocationTask(void);
+static void testRandomAllocation(const char* params);
 
 #endif
