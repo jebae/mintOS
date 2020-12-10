@@ -3,7 +3,7 @@
 SECTION .text
 
 extern commonExceptionHandler, commonInterruptHandler, keyboardHandler
-extern timerHandler, deviceNotAvailableHandler
+extern timerHandler, deviceNotAvailableHandler, HDDhandler
 
 ; exception ISR
 global ISRDivideError, ISRDebug, ISRNMI, ISRBreakPoint, ISROverflow
@@ -340,14 +340,14 @@ ISRCoprocessor:
 ISRHDD1:
 	SAVE_CONTEXT
 	mov rdi, 46
-	call commonInterruptHandler
+	call HDDhandler
 	LOAD_CONTEXT
 	iretq
 
 ISRHDD2:
 	SAVE_CONTEXT
 	mov rdi, 47
-	call commonInterruptHandler
+	call HDDhandler
 	LOAD_CONTEXT
 	iretq
 

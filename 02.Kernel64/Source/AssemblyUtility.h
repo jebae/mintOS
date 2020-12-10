@@ -21,5 +21,7 @@ void saveFPUContext(void* FPUContext);
 void loadFPUContext(void* FPUContext);
 void setTS(void);
 void clearTS(void);
+WORD inPortWord(WORD port);
+void outPortWord(WORD port, WORD data);
 
 #endif

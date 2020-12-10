@@ -3,6 +3,7 @@
 #include "Keyboard.h"
 #include "Console.h"
 #include "AssemblyUtility.h"
+#include "HardDisk.h"
 
 void commonExceptionHandler(int vecNum, QWORD errCode)
 {
@@ -110,4 +111,22 @@ void deviceNotAvailableHandler(int vecNum)
 		currentTask->FPUUsed = TRUE;
 	}
 	setLastFPUUsedTaskId(currentTask->link.id);
+}
+
+void HDDhandler(int vecNum)
+{
+	char buf[] = "[INT:  , ]";
+	static int gHDDInterruptCount = 0;
+
+	buf[5] = '0' + vecNum / 10;
+	buf[6] = '0' + vecNum % 10;
+	buf[8] = '0' + gHDDInterruptCount;
+	gHDDInterruptCount = (gHDDInterruptCount + 1) % 10;
+	printStringXY(10, 0, buf);
+
+	if (vecNum - PIC_IRQ_START_VECTOR == 14)
+		setHDDInterruptFlag(TRUE, TRUE);
+	else
+		setHDDInterruptFlag(FALSE, TRUE);
+	sendEOIToPIC(vecNum - PIC_IRQ_START_VECTOR);
 }

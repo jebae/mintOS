@@ -2,7 +2,7 @@
 
 SECTION .text
 
-global inPortByte, outPortByte, loadGDTR, loadTR, loadIDTR
+global inPortByte, outPortByte, loadGDTR, loadTR, loadIDTR, inPortWord, outPortWord
 global enableInterrupt, disableInterrupt, readRFLAGS
 global readTSC
 global switchContext, hlt, checkLockAndSet
@@ -13,7 +13,7 @@ hlt:
 	hlt
 	ret
 
-; PARAM: port number
+; PARAM: port number(rdi)
 inPortByte:
 	push rdx
 	mov rdx, rdi	; rdi is first parameter
@@ -26,7 +26,16 @@ inPortByte:
 	pop rdx
 	ret
 
-; PARAM: port number, data
+; PARAM: port number(rdi)
+inPortWord:
+	push rdx
+	mov rdx, rdi
+	mov rax, 0
+	in ax, dx
+	pop rdx
+	ret
+
+; PARAM: port number(rdi), data(rsi)
 outPortByte:
 	push rdx
 	push rax
@@ -34,6 +43,19 @@ outPortByte:
 	mov rdx, rdi
 	mov rax, rsi	; rsi is second parameter
 	out dx, al	; al is used because only 1 byte required
+
+	pop rax
+	pop rdx
+	ret
+
+; PARAM: port number(rdi), data(rsi)
+outPortWord:
+	push rdx
+	push rax
+
+	mov rdx, rdi
+	mov rax, rsi
+	out dx, ax
 
 	pop rax
 	pop rdx

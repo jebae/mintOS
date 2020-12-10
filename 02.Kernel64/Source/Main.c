@@ -9,6 +9,7 @@
 #include "Console.h"
 #include "ConsoleShell.h"
 #include "DynamicMemory.h"
+#include "HardDisk.h"
 
 void Main(void)
 {
@@ -71,6 +72,19 @@ void Main(void)
 	enableInterrupt();
 	setCursor(45, y++);
 	printf("PASS\n");
+
+	printf("HDD Initialize.....[    ]");
+	if (initHDD())
+	{
+		setCursor(20, y++);
+		printf("PASS\n");
+	}
+	else
+	{
+		setCursor(20, y++);
+		printf("FAIL\n");
+	}
+
 	createTask(TASK_FLAGS_LOWEST | TASK_FLAGS_THREAD | TASK_FLAGS_SYSTEM | TASK_FLAGS_IDLE,\
 		0, 0, (QWORD)idleTask);
 	startConsoleShell();

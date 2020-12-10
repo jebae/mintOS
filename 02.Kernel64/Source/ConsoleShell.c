@@ -8,6 +8,7 @@
 #include "Task.h"
 #include "Synchronization.h"
 #include "DynamicMemory.h"
+#include "HardDisk.h"
 
 SHELL_COMMAND_ENTRY gCommandTable[] = {
 	{"help", "show help", help},
@@ -33,6 +34,9 @@ SHELL_COMMAND_ENTRY gCommandTable[] = {
 	{"dynamicraminfo", "show dynamic memory information", showDynamicMemoryInformation},
 	{"testseqalloc", "test sequential allocation & free", testSequentialAllocation},
 	{"testranalloc", "test random allocation & free", testRandomAllocation},
+	{"hddinfo", "show HDD information", showHDDInformation},
+	{"readsector", "read HDD sector, ex) readsector 0(LBA) 10(count)", readSector},
+	{"writesector", "write HDD sector, ex) writesector 0(LBA) 10(count)", writeSector},
 };
 
 void startConsoleShell(void)
@@ -859,4 +863,128 @@ static void testRandomAllocation(const char* params)
 	{
 		createTask(TASK_FLAGS_LOWEST | TASK_FLAGS_THREAD, 0, 0, (QWORD)randomAllocationTask);
 	}
+}
+
+static void showHDDInformation(const char* params)
+{
+	HDDINFORMATION HDD;
+	char buf[100];
+
+	if (readHDDInformation(TRUE, TRUE, &HDD) == FALSE)
+	{
+		printf("HDD information read fail\n");
+		return;
+	}
+	printf("========= Primary Master HDD Information =========\n");
+	memcpy(buf, HDD.modelNumber, sizeof(HDD.modelNumber));
+	buf[sizeof(HDD.modelNumber)] = '\0';
+	printf("Model number: %s\n", buf);
+
+	memcpy(buf, HDD.serialNumber, sizeof(HDD.serialNumber));
+	buf[sizeof(HDD.serialNumber)] = '\0';
+	printf("Serial number: %s\n", buf);
+
+	printf("Head count: %d\n", HDD.numberOfHead);
+	printf("Cylinder count: %d\n", HDD.numberOfCylinder);
+	printf("Sector count: %d\n", HDD.numberOfSectorPerCylinder);
+	printf("Total sector: %d, %dMB\n", HDD.totalSectors, HDD.totalSectors / 2 / 1024);
+}
+
+static void readSector(const char* params)
+{
+	PARAMETER_LIST paramList;
+	char LBABuf[50], sectorCountBuf[50];
+	DWORD LBA;
+	int sectorCount, i, j;
+	char* buf;
+	BOOL exit;
+	BYTE data;
+
+	initParameter(&paramList, params);
+	if (getNextParameter(&paramList, LBABuf) == 0 ||
+		getNextParameter(&paramList, sectorCountBuf) == 0)
+	{
+		printf("ex) readsector 0(LBA) 10(count)\n");
+		return;
+	}
+	LBA = atoi(LBABuf, 10);
+	sectorCount = atoi(sectorCountBuf, 10);
+	buf = allocateMemory(512 * sectorCount);
+	if (buf == NULL)
+	{
+		printf("allocate memory fail\n");
+		return;
+	}
+	if (readHDDSector(TRUE, TRUE, LBA, sectorCount, buf) != sectorCount)
+	{
+		printf("read fail\n");
+		freeMemory(buf);
+		return;
+	}
+	printf("LBA [%d], [%d] sector read sucess\n", LBA, sectorCount);
+	for (i=0; i < sectorCount; i++)
+	{
+		for (j=0; j < 512; j++)
+		{
+			if (j % 256 == 0 && !(j == 0 && i == 0))
+			{
+				printf("\nPress any key to continue...('q' is exit): ");
+				if (getch() == 'q')
+				{
+					exit = TRUE;
+					break;
+				}
+			}
+			if (j % 16 == 0)
+				printf("\n[LBA:%d, Offset:%d]\t| ", LBA + i, j);
+			data = buf[i * 512 + j] & 0xFF;
+			if (data < 0x10)
+				printf("0");
+			printf("%X ", data);
+		}
+		if (exit)
+			break;
+		printf("\n");
+	}
+	freeMemory(buf);
+}
+
+static void writeSector(const char* params)
+{
+	PARAMETER_LIST paramList;
+	char LBABuf[50], sectorCountBuf[50];
+	DWORD LBA;
+	int sectorCount, i, j;
+	char* buf;
+	BOOL exit;
+	BYTE data;
+	DWORD writeCount = 1;
+
+	initParameter(&paramList, params);
+	if (getNextParameter(&paramList, LBABuf) == 0 ||
+		getNextParameter(&paramList, sectorCountBuf) == 0)
+	{
+		printf("ex) writesector 0(LBA) 10(count)\n");
+		return;
+	}
+	LBA = atoi(LBABuf, 10);
+	sectorCount = atoi(sectorCountBuf, 10);
+	buf = allocateMemory(512 * sectorCount);
+	if (buf == NULL)
+	{
+		printf("allocate memory fail\n");
+		return;
+	}
+
+	for (i=0; i < sectorCount; i++)
+	{
+		for (j=0; j < 512; j+=8)
+		{
+			*(DWORD*)&buf[512 * i + j] = LBA + i;
+			*(DWORD*)&buf[512 * i + j + 4] = writeCount++;
+		}
+	}
+	if (writeHDDSector(TRUE, TRUE, LBA, sectorCount, buf) != sectorCount)
+		printf("write fail\n");
+	freeMemory(buf);
 }
