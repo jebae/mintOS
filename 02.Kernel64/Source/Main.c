@@ -10,6 +10,7 @@
 #include "ConsoleShell.h"
 #include "DynamicMemory.h"
 #include "HardDisk.h"
+#include "FileSystem.h"
 
 void Main(void)
 {
@@ -82,6 +83,18 @@ void Main(void)
 	else
 	{
 		setCursor(20, y++);
+		printf("FAIL\n");
+	}
+
+	printf("File System Initialize.....[    ]");
+	if (initFileSystem())
+	{
+		setCursor(28, y++);
+		printf("PASS\n");
+	}
+	else
+	{
+		setCursor(28, y++);
 		printf("FAIL\n");
 	}
 

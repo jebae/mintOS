@@ -57,5 +57,11 @@ static void testRandomAllocation(const char* params);
 static void showHDDInformation(const char* params);
 static void readSector(const char* params);
 static void writeSector(const char* params);
+static void mountHDD(const char* params);
+static void formatHDD(const char* params);
+static void showFileSystemInformation(const char* params);
+static void createFileInRootDir(const char* params);
+static void deleteFileInRootDir(const char* params);
+static void showRootDir(const char* params);
 
 #endif

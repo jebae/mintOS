@@ -9,6 +9,7 @@
 #include "Synchronization.h"
 #include "DynamicMemory.h"
 #include "HardDisk.h"
+#include "FileSystem.h"
 
 SHELL_COMMAND_ENTRY gCommandTable[] = {
 	{"help", "show help", help},
@@ -37,6 +38,12 @@ SHELL_COMMAND_ENTRY gCommandTable[] = {
 	{"hddinfo", "show HDD information", showHDDInformation},
 	{"readsector", "read HDD sector, ex) readsector 0(LBA) 10(count)", readSector},
 	{"writesector", "write HDD sector, ex) writesector 0(LBA) 10(count)", writeSector},
+	{"mounthdd", "mount HDD", mountHDD},
+	{"formathdd", "format HDD", formatHDD},
+	{"filesysteminfo", "show file system information", showFileSystemInformation},
+	{"createfile", "create file, ex) createfile a.txt", createFileInRootDir},
+	{"deletefile", "delete file, ex) deletefile a.txt", deleteFileInRootDir},
+	{"ls", "show directory", showRootDir},
 };
 
 void startConsoleShell(void)
@@ -870,7 +877,7 @@ static void showHDDInformation(const char* params)
 	HDDINFORMATION HDD;
 	char buf[100];
 
-	if (readHDDInformation(TRUE, TRUE, &HDD) == FALSE)
+	if (getHDDInformation(&HDD) == FALSE)
 	{
 		printf("HDD information read fail\n");
 		return;
@@ -987,4 +994,176 @@ static void writeSector(const char* params)
 	if (writeHDDSector(TRUE, TRUE, LBA, sectorCount, buf) != sectorCount)
 		printf("write fail\n");
 	freeMemory(buf);
+}
+
+static void mountHDD(const char* params)
+{
+	if (!mount())
+	{
+		printf("HDD mount fail\n");
+		return;
+	}
+	printf("HDD mount success\n");
+}
+
+static void formatHDD(const char* params)
+{
+	if (!format())
+	{
+		printf("HDD format fail\n");
+		return;
+	}
+	printf("HDD format success\n");
+}
+
+static void showFileSystemInformation(const char* params)
+{
+	FILESYSTEM_MANAGER manager;
+
+	getFileSystemInformation(&manager);
+	printf("========== File System Information ==========\n");
+	printf("Mounted: %d\n", manager.isMounted);
+	printf("Reserved sector count: %d\n", manager.reservedSectorCount);
+	printf("Cluster link table start address: %d\n", manager.clusterLinkAreaStartAddress);
+	printf("Cluster link table size: %d\n", manager.clusterLinkAreaSize);
+	printf("Data area start address: %d\n", manager.dataAreaStartAddress);
+	printf("Total cluster count: %d\n", manager.totalClusterCount);
+}
+
+static void createFileInRootDir(const char* params)
+{
+	PARAMETER_LIST paramList;
+	char fileName[50];
+	DWORD cluster;
+	DIRECTORY_ENTRY entry;
+	int entryIdx;
+	int len;
+
+	initParameter(&paramList, params);
+	getNextParameter(&paramList, fileName);
+	len = strlen(fileName);
+	if (len == 0 || len > sizeof(entry.fileName) - 1)
+	{
+		printf("invalid file name\n");
+		return;
+	}
+	cluster = findFreeCluster();
+	if (cluster == FILESYSTEM_LAST_CLUSTER ||
+		!setClusterLinkData(cluster, FILESYSTEM_LAST_CLUSTER))
+	{
+		printf("cluster allocation fail\n");
+		return;
+	}
+
+	entryIdx = findFreeDirectoryEntry();
+	if (entryIdx == -1)
+	{
+		setClusterLinkData(cluster, FILESYSTEM_FREE_CLUSTER);
+		printf("directory entry is full\n");
+		return;
+	}
+
+	memcpy(entry.fileName, fileName, len + 1);
+	entry.startClusterIdx = cluster;
+	entry.fileSize = 0;
+	if (!setDirectoryEntryData(entryIdx, &entry))
+	{
+		setClusterLinkData(cluster, FILESYSTEM_FREE_CLUSTER);
+		printf("directory entry set fail\n");
+		return;
+	}
+	printf("file created [%s]\n", fileName);
+}
+
+static void deleteFileInRootDir(const char* params)
+{
+	PARAMETER_LIST paramList;
+	char fileName[50];
+	DIRECTORY_ENTRY entry;
+	int entryIdx;
+
+	initParameter(&paramList, params);
+	getNextParameter(&paramList, fileName);
+
+	entryIdx = findDirectoryEntry(fileName, &entry);
+	if (entryIdx == -1)
+	{
+		printf("file not found\n");
+		return;
+	}
+	if (!setClusterLinkData(entry.startClusterIdx, FILESYSTEM_FREE_CLUSTER))
+	{
+		printf("cluster free failed\n");
+		return;
+	}
+
+	memset(&entry, 0, sizeof(DIRECTORY_ENTRY));
+	if (!setDirectoryEntryData(entryIdx, &entry))
+	{
+		printf("root directory update fail\n");
+		return;
+	}
+	printf("file removed [%s]\n", fileName);
+}
+
+static void showRootDir(const char* params)
+{
+	BYTE* clusterBuf;
+	int i, count, totalCount;
+	DIRECTORY_ENTRY* entry;
+	char buf[400];
+	char temp[50];
+	DWORD totalByte;
+
+	clusterBuf = allocateMemory(FILESYSTEM_SECTOR_PER_CLUSTER * 512);
+	if (!readCluster(0, clusterBuf))
+	{
+		printf("root directory read fail\n");
+		return;
+	}
+
+	entry = (DIRECTORY_ENTRY*)clusterBuf;
+	totalCount = 0;
+	totalByte = 0;
+	for (i=0; i < FILESYSTEM_MAX_DIRECTORY_ENTRY_COUNT; i++)
+	{
+		if (entry[i].startClusterIdx == FILESYSTEM_FREE_CLUSTER)
+			continue;
+		totalByte += entry[i].fileSize;
+		totalCount++;
+	}
+
+	count = 0;
+	for (i=0; i < FILESYSTEM_MAX_DIRECTORY_ENTRY_COUNT; i++)
+	{
+		if (entry[i].startClusterIdx == FILESYSTEM_FREE_CLUSTER)
+			continue;
+		memset(buf, ' ', sizeof(buf) - 1);
+		buf[sizeof(buf) - 1] = '\0';
+
+		// file name
+		memcpy(buf, entry[i].fileName, strlen(entry[i].fileName));
+
+		// file size
+		sprintf(temp, "%d byte", entry[i].fileSize);
+		memcpy(buf + 30, temp, strlen(temp));
+
+		// start cluster idx
+		sprintf(temp, "0x%X cluster", entry[i].startClusterIdx);
+		memcpy(buf + 55, temp, strlen(temp) + 1);
+
+		printf("   %s\n", buf);
+		if (count != 0 && count % 20 == 0)
+		{
+			printf("Press any key to continue...('q' is exit): ");
+			if (getch() == 'q')
+			{
+				printf("\n");
+				break;
+			}
+			printf("\n");
+		}
+	}
+	printf("Total file count: %d\t Total file size: %d byte\n", totalCount, totalByte);
+	freeMemory(clusterBuf);
 }
