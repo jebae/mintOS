@@ -28,7 +28,7 @@ BOOL initHDD(void)
 
 static BYTE readHDDStatus(BOOL isPrimary)
 {
-	if (isPrimary == TRUE)
+	if (isPrimary)
 		return inPortByte(HDD_PORT_PRIMARY_BASE + HDD_PORT_INDEX_STATUS);
 	return inPortByte(HDD_PORT_SECONDARY_BASE + HDD_PORT_INDEX_STATUS);
 }
@@ -38,7 +38,7 @@ static BOOL waitForHDDBusy(BOOL isPrimary)
 	QWORD tickCount;
 
 	tickCount = getTickCount();
-	while (getTickCount() - tickCount < HDD_WAIT_TIME)
+	while (getTickCount() - tickCount <= HDD_WAIT_TIME)
 	{
 		if ((readHDDStatus(isPrimary) & HDD_STATUS_BUSY) != HDD_STATUS_BUSY)
 			return TRUE;
@@ -157,8 +157,8 @@ int readHDDSector(BOOL isPrimary, BOOL isMaster, DWORD LBA, int sectorCount, cha
 	long readCount = 0;
 
 	if (!gHDDManager.HDDDetected ||
-		sectorCount <= 0 || sectorCount > 256 ||
-		LBA + sectorCount >= gHDDManager.HDDInformation.totalSectors)
+		(sectorCount <= 0) || (sectorCount > 256) ||
+		(LBA + sectorCount >= gHDDManager.HDDInformation.totalSectors))
 		return 0;
 
 	portBase = (isPrimary)
@@ -231,21 +231,21 @@ int writeHDDSector(BOOL isPrimary, BOOL isMaster, DWORD LBA, int sectorCount, ch
 	int i, j;
 	long readCount = 0;
 
-	if (!gHDDManager.HDDDetected ||
-		sectorCount <= 0 || sectorCount > 256 ||
-		LBA + sectorCount >= gHDDManager.HDDInformation.totalSectors)
+	if (!gHDDManager.canWrite ||
+		(sectorCount <= 0) || (sectorCount > 256) ||
+		(LBA + sectorCount >= gHDDManager.HDDInformation.totalSectors))
 		return 0;
 
 	portBase = (isPrimary)
 		? HDD_PORT_PRIMARY_BASE
 		: HDD_PORT_SECONDARY_BASE;
-	lock(&gHDDManager.mutex);
 
 	if (!waitForHDDBusy(isPrimary))
 	{
 		unlock(&gHDDManager.mutex);
 		return FALSE;
 	}
+	lock(&gHDDManager.mutex);
 
 	outPortByte(portBase + HDD_PORT_INDEX_SECTOR_COUNT, sectorCount);
 	outPortByte(portBase + HDD_PORT_INDEX_SECTOR_NUMBER, LBA);
@@ -264,7 +264,6 @@ int writeHDDSector(BOOL isPrimary, BOOL isMaster, DWORD LBA, int sectorCount, ch
 		return FALSE;
 	}
 
-	setHDDInterruptFlag(isPrimary, FALSE);
 	outPortByte(portBase + HDD_PORT_INDEX_COMMAND, HDD_COMMAND_WRITE);
 
 	while (1)

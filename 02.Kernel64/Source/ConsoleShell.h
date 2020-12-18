@@ -63,5 +63,8 @@ static void showFileSystemInformation(const char* params);
 static void createFileInRootDir(const char* params);
 static void deleteFileInRootDir(const char* params);
 static void showRootDir(const char* params);
+static void writeDataToFile(const char* params);
+static void readDataToFile(const char* params);
+static void testFileIO(const char* params);
 
 #endif

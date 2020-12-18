@@ -44,6 +44,9 @@ SHELL_COMMAND_ENTRY gCommandTable[] = {
 	{"createfile", "create file, ex) createfile a.txt", createFileInRootDir},
 	{"deletefile", "delete file, ex) deletefile a.txt", deleteFileInRootDir},
 	{"ls", "show directory", showRootDir},
+	{"writefile", "write data to file ex) writefile a.txt", writeDataToFile},
+	{"readfile", "read data from file ex) readfile a.txt", readDataToFile},
+	{"testfileio", "test file IO function", testFileIO},
 };
 
 void startConsoleShell(void)
@@ -1034,76 +1037,49 @@ static void createFileInRootDir(const char* params)
 {
 	PARAMETER_LIST paramList;
 	char fileName[50];
-	DWORD cluster;
-	DIRECTORY_ENTRY entry;
-	int entryIdx;
 	int len;
+	FILE* file;
 
 	initParameter(&paramList, params);
 	getNextParameter(&paramList, fileName);
 	len = strlen(fileName);
-	if (len == 0 || len > sizeof(entry.fileName) - 1)
+	if (len == 0 || len > FILESYSTEM_MAX_FILENAME_LENGTH - 1)
 	{
 		printf("invalid file name\n");
 		return;
 	}
-	cluster = findFreeCluster();
-	if (cluster == FILESYSTEM_LAST_CLUSTER ||
-		!setClusterLinkData(cluster, FILESYSTEM_LAST_CLUSTER))
-	{
-		printf("cluster allocation fail\n");
-		return;
-	}
 
-	entryIdx = findFreeDirectoryEntry();
-	if (entryIdx == -1)
+	file = fopen(fileName, "w");
+	if (file == NULL)
 	{
-		setClusterLinkData(cluster, FILESYSTEM_FREE_CLUSTER);
-		printf("directory entry is full\n");
+		printf("file create fail\n");
 		return;
 	}
-
-	memcpy(entry.fileName, fileName, len + 1);
-	entry.startClusterIdx = cluster;
-	entry.fileSize = 0;
-	if (!setDirectoryEntryData(entryIdx, &entry))
-	{
-		setClusterLinkData(cluster, FILESYSTEM_FREE_CLUSTER);
-		printf("directory entry set fail\n");
-		return;
-	}
-	printf("file created [%s]\n", fileName);
+	fclose(file);
+	printf("%s created\n", fileName);
 }
 
 static void deleteFileInRootDir(const char* params)
 {
 	PARAMETER_LIST paramList;
 	char fileName[50];
-	DIRECTORY_ENTRY entry;
-	int entryIdx;
+	int len;
 
 	initParameter(&paramList, params);
 	getNextParameter(&paramList, fileName);
-
-	entryIdx = findDirectoryEntry(fileName, &entry);
-	if (entryIdx == -1)
+	len = strlen(fileName);
+	if (len == 0 || len > FILESYSTEM_MAX_FILENAME_LENGTH - 1)
 	{
-		printf("file not found\n");
-		return;
-	}
-	if (!setClusterLinkData(entry.startClusterIdx, FILESYSTEM_FREE_CLUSTER))
-	{
-		printf("cluster free failed\n");
+		printf("invalid file name\n");
 		return;
 	}
 
-	memset(&entry, 0, sizeof(DIRECTORY_ENTRY));
-	if (!setDirectoryEntryData(entryIdx, &entry))
+	if (remove(fileName) != 0)
 	{
-		printf("root directory update fail\n");
+		printf("file not found or file opened\n", fileName);
 		return;
 	}
-	printf("file removed [%s]\n", fileName);
+	printf("%s removed\n", fileName);
 }
 
 static void showRootDir(const char* params)
@@ -1113,43 +1089,52 @@ static void showRootDir(const char* params)
 	DIRECTORY_ENTRY* entry;
 	char buf[400];
 	char temp[50];
-	DWORD totalByte;
+	DWORD totalByte, usedClusterCount;
+	DIR* dir;
+	FILESYSTEM_MANAGER manager;
 
-	clusterBuf = allocateMemory(FILESYSTEM_SECTOR_PER_CLUSTER * 512);
-	if (!readCluster(0, clusterBuf))
+	getFileSystemInformation(&manager);
+
+	dir = openDirectory("/");
+	if (dir == NULL)
 	{
-		printf("root directory read fail\n");
+		printf("root directory open fail\n");
 		return;
 	}
 
-	entry = (DIRECTORY_ENTRY*)clusterBuf;
 	totalCount = 0;
 	totalByte = 0;
-	for (i=0; i < FILESYSTEM_MAX_DIRECTORY_ENTRY_COUNT; i++)
+	usedClusterCount = 0;
+	entry = readDirectory(dir);
+	while (entry != NULL)
 	{
-		if (entry[i].startClusterIdx == FILESYSTEM_FREE_CLUSTER)
-			continue;
-		totalByte += entry[i].fileSize;
+		totalByte += entry->fileSize;
 		totalCount++;
+		if (entry->fileSize == 0)
+			usedClusterCount++;
+		else
+			usedClusterCount += (entry->fileSize + (FILESYSTEM_CLUSTER_SIZE - 1)) /
+				FILESYSTEM_CLUSTER_SIZE;
+		entry = readDirectory(dir);
 	}
 
+	rewindDirectory(dir);
+	entry = readDirectory(dir);
 	count = 0;
-	for (i=0; i < FILESYSTEM_MAX_DIRECTORY_ENTRY_COUNT; i++)
+	while (entry != NULL)
 	{
-		if (entry[i].startClusterIdx == FILESYSTEM_FREE_CLUSTER)
-			continue;
 		memset(buf, ' ', sizeof(buf) - 1);
 		buf[sizeof(buf) - 1] = '\0';
 
 		// file name
-		memcpy(buf, entry[i].fileName, strlen(entry[i].fileName));
+		memcpy(buf, entry->d_name, strlen(entry->d_name));
 
 		// file size
-		sprintf(temp, "%d byte", entry[i].fileSize);
+		sprintf(temp, "%d byte", entry->fileSize);
 		memcpy(buf + 30, temp, strlen(temp));
 
 		// start cluster idx
-		sprintf(temp, "0x%X cluster", entry[i].startClusterIdx);
+		sprintf(temp, "0x%X cluster", entry->startClusterIdx);
 		memcpy(buf + 55, temp, strlen(temp) + 1);
 
 		printf("   %s\n", buf);
@@ -1163,7 +1148,328 @@ static void showRootDir(const char* params)
 			}
 			printf("\n");
 		}
+		entry = readDirectory(dir);
 	}
-	printf("Total file count: %d\t Total file size: %d byte\n", totalCount, totalByte);
-	freeMemory(clusterBuf);
+	printf("Total file count: %d\n", totalCount);
+	printf("Total file size: %dKB (%d cluster)\n",
+			totalByte / 1024, usedClusterCount);
+	printf("Free space: %dKB (%d cluster)\n",
+			(manager.totalClusterCount - usedClusterCount) * FILESYSTEM_CLUSTER_SIZE / 1024,
+			manager.totalClusterCount - usedClusterCount);
+	closedir(dir);
+}
+
+static void writeDataToFile(const char* params)
+{
+	PARAMETER_LIST paramList;
+	char fileName[50];
+	int len;
+	FILE* fp;
+	int enterCount;
+	BYTE key;
+
+	initParameter(&paramList, params);
+	len = getNextParameter(&paramList, fileName);
+	fileName[len] = '\0';
+
+	if (len == 0 || len > FILESYSTEM_MAX_FILENAME_LENGTH - 1)
+	{
+		printf("invalid file name\n");
+		return;
+	}
+
+	fp = fopen(fileName, "w");
+	if (fp == NULL)
+	{
+		printf("%s file open fail\n", fileName);
+		return;
+	}
+	enterCount = 0;
+	while (1)
+	{
+		key = getch();
+		if (key == KEY_ENTER)
+		{
+			enterCount++;
+			if (enterCount >= 3)
+				break;
+		}
+		else
+		{
+			enterCount = 0;
+		}
+		printf("%c", key);
+		if (fwrite(&key, 1, 1, fp) != 1)
+		{
+			printf("file write fail\n");
+			break;
+		}
+	}
+	printf("file create success\n");
+	fclose(fp);
+}
+
+static void readDataToFile(const char* params)
+{
+	PARAMETER_LIST paramList;
+	char fileName[50];
+	int len, enterCount;
+	FILE* fp;
+	BYTE key;
+
+	initParameter(&paramList, params);
+	len = getNextParameter(&paramList, fileName);
+	fileName[len] = '\0';
+	if (len == 0 || len > FILESYSTEM_MAX_FILENAME_LENGTH - 1)
+	{
+		printf("invalid file name\n");
+		return;
+	}
+
+	fp = fopen(fileName, "r");
+	if (fp == NULL)
+	{
+		printf("%s file open fail\n", fileName);
+		return;
+	}
+	enterCount = 0;
+	while (1)
+	{
+		if (fread(&key, 1, 1, fp) != 1)
+			break;
+		printf("%c", key);
+		if (key == KEY_ENTER)
+		{
+			enterCount++;
+			if (enterCount % 20 == 0)
+			{
+				printf("Press any key to continue...('q' is exit): ");
+				if (getch() == 'q')
+				{
+					printf("\n");
+					break;
+				}
+				printf("\n");
+				enterCount = 0;
+			}
+		}
+	}
+	fclose(fp);
+}
+
+static void testFileIO(const char* params)
+{
+	FILE* file;
+	BYTE* buf;
+	int i, j;
+	DWORD randomOffset;
+	DWORD byteCount;
+	BYTE tempBuffer[1024];
+	DWORD maxFileSize;
+
+	printf("============= File I/O Function Test =============\n");
+	maxFileSize = 4 * 1024 * 1024; // 4MB
+	buf = (BYTE*)allocateMemory(maxFileSize);
+	if (buf == NULL)
+	{
+		printf("memory allocation fail\n");
+		return;
+	}
+	remove("testfileio.bin");
+
+	// ====================================
+	// open file
+	// ====================================
+	printf("1. File open fail test...");
+	file = fopen("testfileio.bin", "r");
+	if (file == NULL)
+		printf("[PASS]\n");
+	else
+	{
+		printf("[FAIL]\n");
+		fclose(file);
+	}
+
+	// ====================================
+	// file create
+	// ====================================
+	printf("2. File create test...");
+	file = fopen("testfileio.bin", "w");
+	if (file != NULL)
+	{
+		printf("[PASS]\n");
+		printf("\t File handle [0x%Q]\n", file);
+	}
+	else
+		printf("[FAIL]\n");
+
+	// ====================================
+	// sequential file write
+	// ====================================
+	printf("3. Sequential write test(cluster size)...");
+	for (i=0; i < 100; i++)
+	{
+		memset(buf, (BYTE)i, FILESYSTEM_CLUSTER_SIZE);
+		if (fwrite(buf, 1, FILESYSTEM_CLUSTER_SIZE, file) != FILESYSTEM_CLUSTER_SIZE)
+		{
+			printf("[FAIL]\n");
+			printf("\t %d cluster error\n", i);
+			break;
+		}
+	}
+	if (i >= 100)
+		printf("[PASS]\n");
+
+	// ====================================
+	// sequential file read
+	// ====================================
+	printf("4. Sequential read and verify test(cluster size)...");
+	fseek(file, -100 * FILESYSTEM_CLUSTER_SIZE, SEEK_END);
+	for (i=0; i < 100; i++)
+	{
+		if (fread(buf, 1, FILESYSTEM_CLUSTER_SIZE, file) != FILESYSTEM_CLUSTER_SIZE)
+		{
+			printf("[FAIL]\n");
+			return;
+		}
+		for (j=0; j < FILESYSTEM_CLUSTER_SIZE; j++)
+		{
+			if (buf[j] != (BYTE)i)
+			{
+				printf("[FAIL]\n");
+				printf("\t %d [%X] != [%X]\n", i, buf[j], (BYTE)i);
+				break;
+			}
+		}
+	}
+	if (i >= 100)
+		printf("[PASS]\n");
+
+	// ====================================
+	// random file write
+	// ====================================
+	printf("5. Random write test...\n");
+	memset(buf, 0, maxFileSize);
+	fseek(file, -100 * FILESYSTEM_CLUSTER_SIZE, SEEK_CUR);
+	fread(buf, 1, maxFileSize, file);
+	
+	for (i=0; i < 100; i++)
+	{
+		// from randomOffset to randomOffset + byteCount
+		byteCount = random() % (sizeof(tempBuffer) - 1) + 1;
+		randomOffset = random() % (maxFileSize - byteCount);
+		printf("\t [%d] offset [%d] byte [%d]...", i, randomOffset, byteCount);
+
+		fseek(file, randomOffset, SEEK_SET);
+		memset(tempBuffer, (BYTE)i, byteCount);
+		if (fwrite(tempBuffer, 1, byteCount, file) != byteCount)
+		{
+			printf("[FAIL]\n");
+			break;
+		}
+		else
+		{
+			printf("[PASS]\n");
+		}
+		memset(buf + randomOffset, (BYTE)i, byteCount);
+	}
+	fseek(file, maxFileSize - 1, SEEK_SET);
+	fwrite(&i, 1, 1, file);
+	buf[maxFileSize - 1] = (BYTE)i;
+
+	// ====================================
+	// random file read
+	// ====================================
+	printf("6. Random read and verify test...\n");
+	for (i=0; i < 100; i++)
+	{
+		// from randomOffset to randomOffset + byteCount
+		byteCount = random() % (sizeof(tempBuffer) - 1) + 1;
+		randomOffset = random() % (maxFileSize - byteCount);
+		printf("\t [%d] offset [%d] byte [%d]...", i, randomOffset, byteCount);
+
+		fseek(file, randomOffset, SEEK_SET);
+		if (fread(tempBuffer, 1, byteCount, file) != byteCount)
+		{
+			printf("[FAIL]\n");
+			printf("\t %d read fail\n", randomOffset);
+			break;
+		}
+		if (memcmp(buf + randomOffset, tempBuffer, byteCount) != 0)
+		{
+			printf("[FAIL]\n");
+			printf("\t %d compare fail\n", randomOffset);
+			break;
+		}
+		printf("[PASS]\n");
+	}
+
+	// ====================================
+	// sequential file read
+	// ====================================
+	printf("7. Sequential write, read and verify test(1024 byte)...\n");
+	fseek(file, -maxFileSize, SEEK_CUR);
+	for (i=0; i < (2 * 1024 * 1024 / 1024); i++)
+	{
+		printf("\t [%d] offset [%d] byte [%d] write...", i, i * 1024, 1024);
+		if (fwrite(buf + i * 1024, 1, 1024, file) != 1024)
+		{
+			printf("[FAIL]\n");
+			return;
+		}
+		else
+		{
+			printf("[PASS]\n");
+		}
+	}
+	fseek(file, -maxFileSize, SEEK_SET);
+	
+	for (i=0; i < maxFileSize / 1024; i++)
+	{
+		printf("\t [%d] offset [%d] byte [%d] read and verify...",
+				i, i * 1024, 1024);
+		if (fread(tempBuffer, 1, 1024, file) != 1024)
+		{
+			printf("[FAIL]\n");
+			return;
+		}
+		if (memcmp(buf + i * 1024, tempBuffer, 1024) != 0)
+		{
+			printf("[FAIL]\n");
+			break;
+		}
+		else
+		{
+			printf("[PASS]\n");
+		}
+	}
+
+	// ====================================
+	// file remove fail
+	// ====================================
+	printf("8. File delete fail test...");
+	if (remove("testfileio.bin") != 0)
+		printf("[PASS]\n");
+	else
+		printf("[FAIL]\n");
+
+	// ====================================
+	// file close
+	// ====================================
+	printf("9. File close test...");
+	if (fclose(file) == 0)
+		printf("[PASS]\n");
+	else
+		printf("[FAIL]\n");
+
+	// ====================================
+	// file remove
+	// ====================================
+	printf("10. File delete test...");
+	if (remove("testfileio.bin") == 0)
+		printf("[PASS]\n");
+	else
+		printf("[FAIL]\n");
+
+	freeMemory(buf);
 }
