@@ -47,6 +47,8 @@ SHELL_COMMAND_ENTRY gCommandTable[] = {
 	{"writefile", "write data to file ex) writefile a.txt", writeDataToFile},
 	{"readfile", "read data from file ex) readfile a.txt", readDataToFile},
 	{"testfileio", "test file IO function", testFileIO},
+	{"testperformance", "test file read/write performance", testPerformance},
+	{"flush", "flush file system cache", flushCache},
 };
 
 void startConsoleShell(void)
@@ -226,6 +228,11 @@ static void stringToDecimalHexTest(const char* params)
 static void shutdown(const char* params)
 {
 	printf("System shutdown start...\n");
+	printf("Cache Flush...");
+	if (flushFileSystemCache())
+		printf("[PASS]\n");
+	else
+		printf("[FAIL]\n");
 	printf("Press any key to reboot...");
 	getch();
 	reboot();
@@ -1472,4 +1479,126 @@ static void testFileIO(const char* params)
 		printf("[FAIL]\n");
 
 	freeMemory(buf);
+}
+
+static void testPerformance(const char* params)
+{
+	FILE* file;
+	DWORD clusterTestFileSize;
+	DWORD oneByteTestFileSize;
+	QWORD lastTickCount;
+	DWORD i;
+	BYTE* buf;
+
+	clusterTestFileSize = 1024 * 1024; // 1MB
+	oneByteTestFileSize = 16 * 1024; // 16KB
+
+	buf = (BYTE*)allocateMemory(clusterTestFileSize);
+	if (buf == NULL)
+	{
+		printf("Memory allocate fail\n");
+		return;
+	}
+	memset(buf, 0, FILESYSTEM_CLUSTER_SIZE);
+
+	// ====================================
+	// file write by cluster
+	// ====================================
+	printf("1. Sequential Read/Write test(cluster size)\n");
+	remove("performance.txt");
+	file = fopen("performance.txt", "w");
+	if (file == NULL)
+	{
+		printf("file open fail\n");
+		freeMemory(buf);
+		return;
+	}
+
+	lastTickCount = getTickCount();
+	for (i=0; i < clusterTestFileSize / FILESYSTEM_CLUSTER_SIZE; i++)
+	{
+		if (fwrite(buf, 1, FILESYSTEM_CLUSTER_SIZE, file) != FILESYSTEM_CLUSTER_SIZE)
+		{
+			printf("write fail\n");
+			fclose(file);
+			freeMemory(buf);
+			return;
+		}
+	}
+	printf("\t sequential write(cluster size): %dms\n", getTickCount() - lastTickCount);
+
+	// ====================================
+	// file read by cluster
+	// ====================================
+	fseek(file, 0, SEEK_SET);
+	lastTickCount = getTickCount();
+	for (i=0; i < clusterTestFileSize / FILESYSTEM_CLUSTER_SIZE; i++)
+	{
+		if (fread(buf, 1, FILESYSTEM_CLUSTER_SIZE, file) != FILESYSTEM_CLUSTER_SIZE)
+		{
+			printf("read fail\n");
+			fclose(file);
+			freeMemory(buf);
+			return;
+		}
+	}
+	printf("\t sequential read(cluster size): %dms\n", getTickCount() - lastTickCount);
+	fclose(file);
+
+	// ====================================
+	// file write by 1 byte
+	// ====================================
+	printf("2. Sequential Read/Write test(1 byte)\n");
+	remove("performance.txt");
+	file = fopen("performance.txt", "w");
+	if (file == NULL)
+	{
+		printf("file open fail\n");
+		freeMemory(buf);
+		return;
+	}
+	lastTickCount = getTickCount();
+	for (i=0; i < oneByteTestFileSize; i++)
+	{
+		if (fwrite(buf, 1, 1, file) != 1)
+		{
+			printf("write fail\n");
+			fclose(file);
+			freeMemory(buf);
+			return;
+		}
+	}
+	printf("\t sequential write(1 byte): %dms\n", getTickCount() - lastTickCount);
+
+	// ====================================
+	// file read by 1 byte
+	// ====================================
+	fseek(file, 0, SEEK_SET);
+	lastTickCount = getTickCount();
+	for (i=0; i < oneByteTestFileSize; i++)
+	{
+		if (fread(buf, 1, 1, file) != 1)
+		{
+			printf("read fail\n");
+			fclose(file);
+			freeMemory(buf);
+			return;
+		}
+	}
+	printf("\t sequential read(1 byte): %dms\n", getTickCount() - lastTickCount);
+	freeMemory(buf);
+	fclose(file);
+}
+
+static void flushCache(const char* params)
+{
+	QWORD lastTickCount;
+
+	lastTickCount = getTickCount();
+	printf("Cache flush...");
+	if (flushFileSystemCache())
+		printf("[PASS]\n");
+	else
+		printf("[FAIL]\n");
+	printf("Total time: %dms\n", getTickCount() - lastTickCount);
 }

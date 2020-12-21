@@ -4,6 +4,7 @@
 #include "Types.h"
 #include "Synchronization.h"
 #include "HardDisk.h"
+#include "CacheManager.h"
 
 #define FILESYSTEM_SIGNATURE						0x7E38CF10
 #define FILESYSTEM_SECTOR_PER_CLUSTER		8
@@ -117,6 +118,7 @@ typedef struct FileSystemManagerStruct
 	DWORD lastAllocatedClusterLinkSectorOffset;
 	MUTEX mutex;
 	FILE* handlePool;
+	BOOL cacheEnabled;
 } FILESYSTEM_MANAGER;
 
 BOOL initFileSystem(void);
@@ -154,5 +156,18 @@ static BOOL createFile(const char* fileName, DIRECTORY_ENTRY* entry,\
 		int* directoryEntryIdx);
 static BOOL freeClusterUntilEnd(DWORD clusterIdx);
 static BOOL updateDirectoryEntry(FILE_HANDLE* fileHandle);
+
+static BOOL readClusterLinkTableWithoutCache(DWORD offset, BYTE* buf);
+static BOOL readClusterLinkTableWithCache(DWORD offset, BYTE* buf);
+static BOOL writeClusterLinkTableWithoutCache(DWORD offset, BYTE* buf);
+static BOOL writeClusterLinkTableWithCache(DWORD offset, BYTE* buf);
+
+static BOOL readClusterWithoutCache(DWORD offset, BYTE* buf);
+static BOOL readClusterWithCache(DWORD offset, BYTE* buf);
+static BOOL writeClusterWithoutCache(DWORD offset, BYTE* buf);
+static BOOL writeClusterWithCache(DWORD offset, BYTE* buf);
+
+static CACHE_BUFFER* allocateCacheBufferWithFlush(int cacheTableIdx);
+BOOL flushFileSystemCache(void);
 
 #endif

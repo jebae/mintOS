@@ -3,6 +3,8 @@
 #include "DynamicMemory.h"
 #include "Task.h"
 #include "Utility.h"
+#include "CacheManager.h"
+#include "RAMDisk.h"
 #include "Console.h"
 
 static FILESYSTEM_MANAGER gFileSystemManager;
@@ -14,6 +16,8 @@ fWriteHDDSector gWriteHDDSector = NULL;
 
 BOOL initFileSystem(void)
 {
+	BOOL cacheEnabled = FALSE;
+
 	memset(&gFileSystemManager, 0, sizeof(gFileSystemManager));
 	initMutex(&gFileSystemManager.mutex);
 
@@ -22,12 +26,21 @@ BOOL initFileSystem(void)
 		gReadHDDInformation = readHDDInformation;
 		gReadHDDSector = readHDDSector;
 		gWriteHDDSector = writeHDDSector;
+		cacheEnabled = TRUE;
+	}
+	else if (initRDD(RDD_TOTAL_SECTOR_COUNT))
+	{
+		gReadHDDInformation = readRDDInformation;
+		gReadHDDSector = readRDDSector;
+		gWriteHDDSector = writeRDDSector;
+		if (!format())
+			return FALSE;
 	}
 	else
 	{
 		return FALSE;
 	}
-	if (mount() == FALSE)
+	if (!mount())
 		return FALSE;
 
 	gFileSystemManager.handlePool = (FILE*)allocateMemory(sizeof(FILE) * \
@@ -39,6 +52,8 @@ BOOL initFileSystem(void)
 	}
 	memset(gFileSystemManager.handlePool, 0, sizeof(FILE) * \
 			FILESYSTEM_HANDLE_MAX_COUNT);
+	if (cacheEnabled)
+		gFileSystemManager.cacheEnabled = initCacheManager();
 	return TRUE;
 }
 
@@ -132,6 +147,12 @@ BOOL format(void)
 			return FALSE;
 		}
 	}
+
+	if (gFileSystemManager.cacheEnabled)
+	{
+		discardAllCacheBuffer(CACHE_CLUSTER_LINKTABLE_AREA);
+		discardAllCacheBuffer(CACHE_DATA_AREA);
+	}
 	unlock(&gFileSystemManager.mutex);
 	return TRUE;
 }
@@ -148,17 +169,128 @@ BOOL getHDDInformation(HDDINFORMATION* information)
 
 static BOOL readClusterLinkTable(DWORD offset, BYTE* buf)
 {
+	if (gFileSystemManager.cacheEnabled)
+		return readClusterLinkTableWithCache(offset, buf);
+	else
+		return readClusterLinkTableWithoutCache(offset, buf);
+}
+
+static BOOL readClusterLinkTableWithoutCache(DWORD offset, BYTE* buf)
+{
 	return gReadHDDSector(TRUE, TRUE,
 			offset + gFileSystemManager.clusterLinkAreaStartAddress, 1, buf);
+}
+
+static BOOL readClusterLinkTableWithCache(DWORD offset, BYTE* buf)
+{
+	CACHE_BUFFER* cacheBuf;
+
+	cacheBuf = findCacheBuffer(CACHE_CLUSTER_LINKTABLE_AREA, offset);
+	if (cacheBuf != NULL)
+	{
+		memcpy(buf, cacheBuf->buf, 512);
+		return TRUE;
+	}
+
+	if (!readClusterLinkTableWithoutCache(offset, buf))
+		return FALSE;
+
+	cacheBuf = allocateCacheBufferWithFlush(CACHE_CLUSTER_LINKTABLE_AREA);
+	if (cacheBuf == NULL)
+		return FALSE;
+
+	memcpy(cacheBuf->buf, buf, 512);
+	cacheBuf->tag = offset;
+	cacheBuf->isChanged = FALSE;
+	return TRUE;
+}
+
+static CACHE_BUFFER* allocateCacheBufferWithFlush(int cacheTableIdx)
+{
+	CACHE_BUFFER* cacheBuf;
+
+	cacheBuf = allocateCacheBuffer(cacheTableIdx);
+	if (cacheBuf != NULL)
+		return cacheBuf;
+
+	cacheBuf = getVictimInCacheBuffer(cacheTableIdx);
+	if (cacheBuf == NULL)
+	{
+		printf("allocateCacheBufferWithFlush: Cache allocate fail\n");
+		return NULL;
+	}
+
+	if (cacheBuf->isChanged)
+	{
+		switch (cacheTableIdx)
+		{
+			case CACHE_CLUSTER_LINKTABLE_AREA:
+				if (!writeClusterLinkTableWithoutCache(cacheBuf->tag, cacheBuf->buf))
+				{
+					printf("allocateCacheBufferWithFlush: Cache buffer write fail\n");
+					return NULL;
+				}
+				break;
+			case CACHE_DATA_AREA:
+				if (!writeClusterWithoutCache(cacheBuf->tag, cacheBuf->buf))
+				{
+					printf("allocateCacheBufferWithFlush: Cache buffer write fail\n");
+					return NULL;
+				}
+				break;
+			default:
+				printf("allocateCacheBufferWithFlush: Cache buffer write fail\n");
+				return NULL;
+		}
+	}
+	return cacheBuf;
 }
 
 static BOOL writeClusterLinkTable(DWORD offset, BYTE* buf)
 {
+	if (gFileSystemManager.cacheEnabled)
+		return writeClusterLinkTableWithCache(offset, buf);
+	else
+		return writeClusterLinkTableWithoutCache(offset, buf);
+}
+
+static BOOL writeClusterLinkTableWithoutCache(DWORD offset, BYTE* buf)
+{
 	return gWriteHDDSector(TRUE, TRUE,
 			offset + gFileSystemManager.clusterLinkAreaStartAddress, 1, buf);
 }
 
+static BOOL writeClusterLinkTableWithCache(DWORD offset, BYTE* buf)
+{
+	CACHE_BUFFER* cacheBuf;
+
+	cacheBuf = findCacheBuffer(CACHE_CLUSTER_LINKTABLE_AREA, offset);
+	if (cacheBuf != NULL)
+	{
+		memcpy(cacheBuf->buf, buf, 512);
+		cacheBuf->isChanged = TRUE;
+		return TRUE;
+	}
+
+	cacheBuf = allocateCacheBufferWithFlush(CACHE_CLUSTER_LINKTABLE_AREA);
+	if (cacheBuf == NULL)
+		return FALSE;
+
+	memcpy(cacheBuf->buf, buf, 512);
+	cacheBuf->tag = offset;
+	cacheBuf->isChanged = TRUE;
+	return TRUE;
+}
+
 static BOOL readCluster(DWORD offset, BYTE* buf)
+{
+	if (gFileSystemManager.cacheEnabled)
+		return readClusterWithCache(offset, buf);
+	else
+		return readClusterWithoutCache(offset, buf);
+}
+
+static BOOL readClusterWithoutCache(DWORD offset, BYTE* buf)
 {
 	return gReadHDDSector(TRUE, TRUE,
 			(offset * FILESYSTEM_SECTOR_PER_CLUSTER) + gFileSystemManager.dataAreaStartAddress,
@@ -166,12 +298,106 @@ static BOOL readCluster(DWORD offset, BYTE* buf)
 			buf);
 }
 
+static BOOL readClusterWithCache(DWORD offset, BYTE* buf)
+{
+	CACHE_BUFFER* cacheBuf;
+
+	cacheBuf = findCacheBuffer(CACHE_DATA_AREA, offset);
+	if (cacheBuf != NULL)
+	{
+		memcpy(buf, cacheBuf->buf, 512);
+		return TRUE;
+	}
+
+	if (!readClusterWithoutCache(offset, buf))
+		return FALSE;
+
+	cacheBuf = allocateCacheBufferWithFlush(CACHE_DATA_AREA);
+	if (cacheBuf == NULL)
+		return FALSE;
+
+	memcpy(cacheBuf->buf, buf, FILESYSTEM_CLUSTER_SIZE);
+	cacheBuf->tag = offset;
+	cacheBuf->isChanged = FALSE;
+	return TRUE;
+}
+
 static BOOL writeCluster(DWORD offset, BYTE* buf)
+{
+	if (gFileSystemManager.cacheEnabled)
+		return writeClusterWithCache(offset, buf);
+	else
+		return writeClusterWithoutCache(offset, buf);
+}
+
+static BOOL writeClusterWithoutCache(DWORD offset, BYTE* buf)
 {
 	return gWriteHDDSector(TRUE, TRUE,
 			(offset * FILESYSTEM_SECTOR_PER_CLUSTER) + gFileSystemManager.dataAreaStartAddress,
 			FILESYSTEM_SECTOR_PER_CLUSTER,
 			buf);
+}
+
+static BOOL writeClusterWithCache(DWORD offset, BYTE* buf)
+{
+	CACHE_BUFFER* cacheBuf;
+
+	cacheBuf = findCacheBuffer(CACHE_DATA_AREA, offset);
+	if (cacheBuf != NULL)
+	{
+		memcpy(cacheBuf->buf, buf, FILESYSTEM_CLUSTER_SIZE);
+		cacheBuf->isChanged = TRUE;
+		return TRUE;
+	}
+	cacheBuf = allocateCacheBufferWithFlush(CACHE_DATA_AREA);
+	if (cacheBuf == NULL)
+		return FALSE;
+	memcpy(cacheBuf->buf, buf, FILESYSTEM_CLUSTER_SIZE);
+	cacheBuf->tag = offset;
+	cacheBuf->isChanged = TRUE;
+	return TRUE;
+}
+
+BOOL flushFileSystemCache(void)
+{
+	CACHE_BUFFER* cacheBuf;
+	int cacheCount;
+	int i;
+
+	if (!gFileSystemManager.cacheEnabled)
+		return TRUE;
+
+	lock(&gFileSystemManager.mutex);
+
+	getCacheBufferAndCount(CACHE_CLUSTER_LINKTABLE_AREA, &cacheBuf, &cacheCount);
+	for (i=0; i < cacheCount; i++)
+	{
+		if (cacheBuf[i].isChanged)
+		{
+			if (!writeClusterLinkTableWithoutCache(cacheBuf[i].tag, cacheBuf[i].buf))
+			{
+				unlock(&gFileSystemManager.mutex);
+				return FALSE;
+			}
+			cacheBuf[i].isChanged = FALSE;
+		}
+	}
+
+	getCacheBufferAndCount(CACHE_DATA_AREA, &cacheBuf, &cacheCount);
+	for (i=0; i < cacheCount; i++)
+	{
+		if (cacheBuf[i].isChanged)
+		{
+			if (!writeClusterWithoutCache(cacheBuf[i].tag, cacheBuf[i].buf))
+			{
+				unlock(&gFileSystemManager.mutex);
+				return FALSE;
+			}
+			cacheBuf[i].isChanged = FALSE;
+		}
+	}
+	unlock(&gFileSystemManager.mutex);
+	return TRUE;
 }
 
 static DWORD findFreeCluster(void)

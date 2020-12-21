@@ -74,18 +74,6 @@ void Main(void)
 	setCursor(45, y++);
 	printf("PASS\n");
 
-	printf("HDD Initialize.....[    ]");
-	if (initHDD())
-	{
-		setCursor(20, y++);
-		printf("PASS\n");
-	}
-	else
-	{
-		setCursor(20, y++);
-		printf("FAIL\n");
-	}
-
 	printf("File System Initialize.....[    ]");
 	if (initFileSystem())
 	{

@@ -66,5 +66,7 @@ static void showRootDir(const char* params);
 static void writeDataToFile(const char* params);
 static void readDataToFile(const char* params);
 static void testFileIO(const char* params);
+static void flushCache(const char* params);
+static void testPerformance(const char* params);
 
 #endif

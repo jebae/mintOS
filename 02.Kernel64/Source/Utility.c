@@ -5,27 +5,65 @@ volatile QWORD gTickCount = 0;
 
 void memset(void* dest, BYTE data, int size)
 {
-	for (int i=0; i < size; i++)
+	int i, remainedOffset;
+	QWORD buf;
+
+	buf = 0;
+	for (i=0; i < 8; i++)
 	{
-		((char*)dest)[i] = data;
+		buf = (buf << 8) | data;
+	}
+	for (i=0; i < (size / 8); i++)
+	{
+		((QWORD*)dest)[i] = buf;
+	}
+	remainedOffset = i * 8;
+	for (i=0; i < (size % 8); i++)
+	{
+		((char*)dest)[remainedOffset++] = data;
 	}
 }
 
 int memcpy(void* dest, const void* src, int size)
 {
-	for (int i=0; i < size; i++)
+	int i, remainedOffset;
+
+	for (i=0; i < (size / 8); i++)
 	{
-		((char*)dest)[i] = ((char*)src)[i];
+		((QWORD*)dest)[i] = ((QWORD*)src)[i];
+	}
+	remainedOffset = i * 8;
+	for (i=0; i < (size % 8); i++)
+	{
+		((char*)dest)[remainedOffset] = ((char*)src)[remainedOffset];
+		remainedOffset++;
 	}
 	return size;
 }
 
 int memcmp(const void* a, const void* b, int size)
 {
-	for (int i=0; i < size; i++)
+	int i, remainedOffset;
+	QWORD diff;
+
+	for (i=0; i < (size / 8); i++)
 	{
-		if (((char*)a)[i] != ((char*)b)[i])
-			return (int)(((char*)a)[i] - ((char*)b)[i]);
+		diff = ((QWORD*)a)[i] - ((QWORD*)b)[i];
+		if (diff != 0)
+		{
+			for (i=0; i < 8; i++)
+			{
+				if (((diff >> (8 * i)) & 0xFF) != 0)
+					return (diff >> (8 * i)) & 0xFF;
+			}
+		}
+	}
+	remainedOffset = i * 8;
+	for (i=0; i < (size % 8); i++)
+	{
+		if (((char*)a)[remainedOffset] != ((char*)b)[remainedOffset])
+			return ((char*)a)[remainedOffset] - ((char*)b)[remainedOffset];
+		remainedOffset++;
 	}
 	return 0;
 }
