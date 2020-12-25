@@ -11,6 +11,7 @@
 #include "DynamicMemory.h"
 #include "HardDisk.h"
 #include "FileSystem.h"
+#include "SerialPort.h"
 
 void Main(void)
 {
@@ -85,6 +86,10 @@ void Main(void)
 		setCursor(28, y++);
 		printf("FAIL\n");
 	}
+
+	printf("Serial Port Initialize.....[PASS]\n");
+	y++;
+	initSerialPort();
 
 	createTask(TASK_FLAGS_LOWEST | TASK_FLAGS_THREAD | TASK_FLAGS_SYSTEM | TASK_FLAGS_IDLE,\
 		0, 0, (QWORD)idleTask);

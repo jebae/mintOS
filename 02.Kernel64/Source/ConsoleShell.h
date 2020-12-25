@@ -68,5 +68,6 @@ static void readDataToFile(const char* params);
 static void testFileIO(const char* params);
 static void flushCache(const char* params);
 static void testPerformance(const char* params);
+static void downloadFile(const char* params);
 
 #endif

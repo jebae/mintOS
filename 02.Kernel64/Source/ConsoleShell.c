@@ -10,6 +10,7 @@
 #include "DynamicMemory.h"
 #include "HardDisk.h"
 #include "FileSystem.h"
+#include "SerialPort.h"
 
 SHELL_COMMAND_ENTRY gCommandTable[] = {
 	{"help", "show help", help},
@@ -49,6 +50,7 @@ SHELL_COMMAND_ENTRY gCommandTable[] = {
 	{"testfileio", "test file IO function", testFileIO},
 	{"testperformance", "test file read/write performance", testPerformance},
 	{"flush", "flush file system cache", flushCache},
+	{"download", "download data from serial, ex) download a.txt", downloadFile},
 };
 
 void startConsoleShell(void)
@@ -1601,4 +1603,102 @@ static void flushCache(const char* params)
 	else
 		printf("[FAIL]\n");
 	printf("Total time: %dms\n", getTickCount() - lastTickCount);
+}
+
+static void downloadFile(const char* params)
+{
+	PARAMETER_LIST paramList;
+	char fileName[50];
+	int fileNameLength;
+	DWORD dataLength;
+	FILE* fp;
+	DWORD receivedSize;
+	DWORD tempSize;
+	BYTE buf[SERIAL_FIFO_MAX_SIZE];
+	QWORD lastReceivedTickCount;
+
+	initParameter(&paramList, params);
+	fileNameLength = getNextParameter(&paramList, fileName);
+	fileName[fileNameLength] = '\0';
+	if (fileNameLength > FILESYSTEM_MAX_FILENAME_LENGTH - 1 ||
+			fileNameLength == 0)
+	{
+		printf("invalid file name\n");
+		return;
+	}
+
+	clearSerialFIFO();
+
+	printf("wait for data length...");
+	receivedSize = 0;
+	lastReceivedTickCount = getTickCount();
+	while (receivedSize < 4)
+	{
+		tempSize = receiveSerialData(((BYTE*)&dataLength) + receivedSize, 4 - receivedSize);
+		receivedSize += tempSize;
+		if (tempSize == 0)
+		{
+			sleep(0);
+			if (getTickCount() - lastReceivedTickCount > 30000)
+			{
+				printf("time out\n");
+				return;
+			}
+		}
+		else
+		{
+			lastReceivedTickCount = getTickCount();
+		}
+	}
+	printf("%d\n", dataLength);
+
+	sendSerialData("A", 1);
+
+	fp = fopen(fileName, "w");
+	if (fp == NULL)
+	{
+		printf("file open fail\n");
+		return;
+	}
+
+	printf("data receive start: ");
+	receivedSize = 0;
+	lastReceivedTickCount = getTickCount();
+	while (receivedSize < dataLength)
+	{
+		tempSize = receiveSerialData(buf, SERIAL_FIFO_MAX_SIZE);
+		receivedSize += tempSize;
+		if (tempSize == 0)
+		{
+			sleep(0);
+			if (getTickCount() - lastReceivedTickCount > 10000)
+			{
+				printf("time out\n");
+				return;
+			}
+		}
+		else
+		{
+			if (receivedSize % SERIAL_FIFO_MAX_SIZE == 0 ||
+					receivedSize == dataLength)
+			{
+				sendSerialData("A", 1);
+				printf("#");
+			}
+			if (fwrite(buf, 1, tempSize, fp) != tempSize)
+			{
+				printf("file write error occur\n");
+				break;
+			}
+			lastReceivedTickCount = getTickCount();
+		}
+	}
+
+	if (dataLength != receivedSize)
+		printf("error occur. %d/%d\n", dataLength, receivedSize);
+	else
+		printf("download complete %d\n", dataLength);
+
+	fclose(fp);
+	flushFileSystemCache();
 }
